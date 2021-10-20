@@ -1,0 +1,14 @@
+name: dst
+channels:
+  - pytorch
+  - huggingface
+dependencies:
+  - pip
+  - pytorch
+  - cudatoolkit=10.2
+  - transformers
+  - pip:
+      - numpy
+      - matplotlib
+      - scipy
+      - pandas
