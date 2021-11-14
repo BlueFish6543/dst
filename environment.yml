@@ -1,5 +1,6 @@
 name: dst
 channels:
+  - conda-forge
   - pytorch
   - huggingface
 dependencies:
@@ -7,6 +8,8 @@ dependencies:
   - pytorch
   - cudatoolkit=10.2
   - transformers
+  - tensorboard
+  - omegaconf
   - pip:
       - numpy
       - matplotlib
