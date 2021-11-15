@@ -5,9 +5,8 @@ channels:
   - huggingface
 dependencies:
   - pip
-  - pytorch
-  - cudatoolkit=10.2
   - transformers
+  - sentencepiece
   - tensorboard
   - omegaconf
   - click
@@ -16,3 +15,5 @@ dependencies:
       - matplotlib
       - scipy
       - pandas
+
+# python -m pip install -U torch==1.10.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html
