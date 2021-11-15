@@ -10,6 +10,7 @@ dependencies:
   - transformers
   - tensorboard
   - omegaconf
+  - click
   - pip:
       - numpy
       - matplotlib
