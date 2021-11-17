@@ -61,6 +61,10 @@ def process_frame(
         requested_slots = SEPARATORS["service"] + service + SEPARATORS["default"] + requested_slots
         requested_slots_list.append(requested_slots.strip())
 
+    if not state["slot_values"]:
+        # We are done
+        return
+
     # Need to handle case when there are multiple possible values for the slot
     # We pick either the one that was previously in the state, or the one that
     # appears in the system/user utterance, or failing which, the first value
@@ -140,8 +144,13 @@ def main():
                 data = json.load(f)
             result.update(process_file(data))
 
+    r = re.compile(r" <.+> ")
+    out = {
+        "data": result,
+        "special_tokens": list(map(str.strip, filter(r.match, SEPARATORS.values())))
+    }
     with open(args.out, "w") as f:
-        json.dump(result, f, indent=4, sort_keys=True)
+        json.dump(out, f, indent=4, sort_keys=True)
 
 
 if __name__ == '__main__':
