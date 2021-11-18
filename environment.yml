@@ -10,6 +10,7 @@ dependencies:
   - tensorboard
   - omegaconf
   - click
+  - tqdm
   - pip:
       - numpy
       - matplotlib

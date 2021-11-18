@@ -1,45 +1,256 @@
-#!/usr/bin/env python
+import json
 import logging
+import operator
+import pathlib
 import sys
+import time
 from pathlib import Path
 
 import click
-from IPython.core import ultratb
+import torch
+from omegaconf import OmegaConf
+from torch.utils.data import (
+    DataLoader,
+    RandomSampler,
+    SequentialSampler,
+)
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+from transformers import (
+    AdamW,
+    AutoConfig,
+    AutoTokenizer,
+    GPT2LMHeadModel,
+    get_linear_schedule_with_warmup,
+)
 
-import dst
+from src.dst.dataset import (
+    TrainDataset,
+    Vocabulary
+)
+from src.dst.utils import set_seed, save_checkpoint, load_checkpoint
 
-# fallback to debugger on error
-sys.excepthook = ultratb.FormattedTB(mode="Verbose", color_scheme="Linux", call_pdb=1)
-# turn UserWarning messages to errors to find the actual cause
-# import warnings
-# warnings.simplefilter("error")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logger = logging.getLogger(__name__)
 
-_logger = logging.getLogger(__name__)
+
+def get_dataloader(args, tokenizer, filename, sampler, data_size=-1):
+    dataset = TrainDataset(args, tokenizer, filename, data_size)
+    dataloader = DataLoader(
+        dataset,
+        sampler=sampler(dataset),
+        batch_size=args.batch_size,
+        collate_fn=dataset.collate_fn
+    )
+    return dataloader
+
+
+def score_dev(args, dataloader, model):
+    loss_total = 0
+    num_batches = 0
+    model.eval()
+    start_time = time.time()
+    for batch in tqdm(dataloader, desc="Dev", disable=args.verbose.disable_display):
+        num_batches += 1
+        with torch.no_grad():
+            inputs = batch['input_ids'].to(DEVICE)
+            labels = batch['label_ids'].to(DEVICE)
+            output = model(
+                input_ids=inputs,
+                attention_mask=batch['attention_mask'].to(DEVICE),
+                labels=labels,
+            )
+        loss_total += output.loss.item()
+    return loss_total / num_batches, time.time() - start_time
+
+
+def train(args, tokenizer, model, initial_step=0):
+    train_dev_args = args
+    dev_args, train_args = args.dev, args.train
+    log_dir = Path().resolve().joinpath("runs/{}".format(train_args.experiment_name))
+    writer = SummaryWriter(
+        log_dir=str(log_dir),
+    )
+    logger.info(f"Tensorboard logs saved at: {log_dir}")
+    train_dataloader = get_dataloader(
+        train_args,
+        tokenizer,
+        train_args.dst_train_path,
+        sampler=RandomSampler,
+        data_size=train_args.data_size
+    )
+    dev_dataloader = get_dataloader(
+        dev_args,
+        tokenizer,
+        dev_args.dst_dev_path,
+        sampler=SequentialSampler,
+        data_size=dev_args.data_size
+    )
+    optimizer = AdamW(
+        model.parameters(),
+        lr=train_args.learning_rate,
+        eps=train_args.adam_eps
+    )
+    scheduler = None
+    if train_args.use_scheduler:
+        t_total = len(train_dataloader) // train_args.gradient_accumulation_steps * train_args.epochs
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=train_args.warmup_steps,
+            num_training_steps=t_total
+        )
+    eval_step = dev_args.eval_interval // train_args.batch_size
+    gstep = initial_step // train_args.batch_size
+
+    loss_dev, t = score_dev(dev_args, dev_dataloader, model)
+    logger.info(f"Epoch: {gstep} | Dev loss: {loss_dev:.8f} | Time: {t:.3f}")
+    if gstep > 0:
+        # We can't actually read the plot if we log that value
+        writer.add_scalar('Loss/dev', loss_dev, global_step=gstep * train_args.batch_size)
+    dev_loss_curve = [(loss_dev, t, 0)]
+    logger.info('Start training!')
+
+    for epoch in range(train_args.epochs):
+        # Initialise for each epoch
+        start_time = time.time()
+        loss_disp = 0
+        model.train()
+        model.zero_grad()
+
+        iterator = enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch}", disable=train_args.verbose.disable_display))
+        local_step = 0
+        for local_step, batch in iterator:
+            output = model(
+                input_ids=batch['input_ids'].to(DEVICE),
+                attention_mask=batch['attention_mask'].to(DEVICE),
+                labels=batch['label_ids'].to(DEVICE)
+            )
+            loss = output.loss
+            loss_disp += output.loss.item()
+            gstep += 1
+            # Update model
+            if loss.item() != 0:
+                loss = loss / train_args.gradient_accumulation_steps
+                loss.backward()
+            if gstep % train_args.gradient_accumulation_steps == 0:
+                optimizer.step()
+                if train_args.use_scheduler:
+                    scheduler.step()
+                optimizer.zero_grad()
+            if gstep % eval_step == 0:
+                loss_dev, t = score_dev(dev_args, dev_dataloader, model)
+                dev_loss_curve.append((loss_dev, t, gstep))
+                model.train()
+                logger.info(f"Epoch: {gstep} | Dev loss: {loss_dev:.8f} | Time: {t:.3f}")
+                writer.add_scalar('Loss/dev', loss_dev, global_step=gstep * train_args.batch_size)
+                save_checkpoint(train_dev_args, tokenizer, model, gstep * train_args.batch_size)
+
+        loss_disp /= (local_step + 1)
+        logger.info(
+            f"Epoch: {epoch} | Batch: {gstep} | Train loss: {loss_disp:.8f} | Time: {time.time() - start_time:.3f}")
+        writer.add_scalar('Loss/train', loss_disp, global_step=gstep * train_args.batch_size)
+        loss_dev, t = score_dev(dev_args, dev_dataloader, model)
+        logger.info(f"Epoch: {epoch} | Batch: {gstep} | Dev loss: {loss_dev:.8f} | time: {t:.3f}")
+        writer.add_scalar('Loss/dev', loss_dev, global_step=gstep * train_args.batch_size)
+
+    dev_loss_curve.sort(key=operator.itemgetter(0))
+    logger.info(
+        f"Lowest dev loss: {dev_loss_curve[0][0]} | Step: {dev_loss_curve[0][2]} | Time: {dev_loss_curve[0][1]}.")
+
+
+def set_model(args):
+    # Initiate config, tokeniser and model
+    config = AutoConfig.from_pretrained(args.model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    vocabulary = Vocabulary()
+    vocabulary.add_special_tokens(args.special_tokens)
+    tokenizer.add_special_tokens(vocabulary.special_tokens)
+    model = GPT2LMHeadModel.from_pretrained(args.model_name_or_path, config=config)
+    model.resize_token_embeddings(len(tokenizer))
+    model.to(DEVICE)
+    return config, tokenizer, model
 
 
 @click.command()
-@click.option(
-    "-c",
-    "--config",
-    "cfg_path",
-    required=True,
-    type=click.Path(exists=True),
-    help="path to config file",
-)
 @click.option("--quiet", "log_level", flag_value=logging.WARNING, default=True)
 @click.option("-v", "--verbose", "log_level", flag_value=logging.INFO)
 @click.option("-vv", "--very-verbose", "log_level", flag_value=logging.DEBUG)
-@click.version_option(dst.__version__)
-def main(cfg_path: Path, log_level: int):
+@click.option(
+    "-t",
+    "--train-data",
+    "train_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to training data.",
+)
+@click.option(
+    "-d",
+    "--dev-data",
+    "dev_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to dev data.",
+)
+@click.option(
+    "-a",
+    "--args",
+    "args_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to the file with the training arguments.",
+)
+@click.option(
+    "-r",
+    "--restore",
+    "ckpt_path",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to the checkpoint folder from where the model is to be loaded.",
+)
+def main(
+        args_path: pathlib.Path,
+        train_path: pathlib.Path,
+        dev_path: pathlib.Path,
+        log_level: int,
+        ckpt_path: pathlib.Path
+):
+    args = OmegaConf.load(args_path)
+    log_dir = Path(args.train.checkpoint_dir).joinpath(args.train.experiment_name, 'logs').resolve()
+    if not log_dir.exists():
+        log_dir.mkdir(exist_ok=True, parents=True)
+    handlers = [
+        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stderr),
+        logging.FileHandler(
+            '{}.log'.format(log_dir.joinpath(Path(__file__).stem)),
+            mode='a' if ckpt_path else 'w',
+        )
+    ]
     logging.basicConfig(
-        stream=sys.stdout,
+        handlers=handlers,
         level=log_level,
         datefmt="%Y-%m-%d %H:%M",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    # YOUR CODE GOES HERE! Keep the main functionality in src/dst
-    # est = dst.models.Estimator()
+    logger.setLevel(log_level)
+    if ckpt_path:
+        logger.info(f"Restarting training from checkpoint: {ckpt_path}")
+
+    logger.info(OmegaConf.to_yaml(args))
+    logger.info("Training on: {}".format('GPU' if 'cuda' in DEVICE.type else 'CPU'))
+    set_seed(args.reproduce)
+    args.train.dst_train_path = str(train_path)
+    args.dev.dst_dev_path = str(dev_path)
+
+    with open(train_path, "r") as f:
+        args.train.special_tokens = json.load(f)["special_tokens"]
+    initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
+    if ckpt_path:
+        args.train.checkpoint = str(ckpt_path)
+        config, tokenizer, model = load_checkpoint(args.train, device=DEVICE)
+    else:
+        config, tokenizer, model = set_model(args.train)
+    train(args, tokenizer, model, initial_step=initial_step)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

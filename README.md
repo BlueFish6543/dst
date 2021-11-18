@@ -82,7 +82,7 @@ Then take a look into the `scripts` and `notebooks` folders.
 ├── reports                 <- Generated analysis as HTML, PDF, LaTeX, etc.
 │   └── figures             <- Generated plots and figures for reports.
 ├── scripts                 <- Analysis and production scripts which import the
-│                              actual Python package, e.g. train_model.py.
+│                              actual Python package, e.g. train.py.
 ├── setup.cfg               <- Declarative configuration of your project.
 ├── setup.py                <- Use `pip install -e .` to install for development or
 |                              or create a distribution with `tox -e build`.
