@@ -15,7 +15,7 @@ SPECIAL_TOKENS = {
     "eos_token": "<EOS>",
     "pad_token": "<PAD>",
     "sep_token": "<SEP>",
-    "additional_special_tokens": ["<USR>", "<SYS>", "<SVC>"]
+    "additional_special_tokens": ["<USR>", "<SYS>"]
 }
 
 
@@ -47,7 +47,6 @@ class DSTDataset(torch.utils.data.Dataset):
         self.max_seq_len = args.max_seq_len
         with open(filename, 'r') as f:
             dataset = json.load(f)
-            self.special_tokens = dataset["special_tokens"]
             self.data = dataset["data"]
         self._create_examples()
 
