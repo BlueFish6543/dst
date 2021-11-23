@@ -11,10 +11,14 @@ dependencies:
   - omegaconf
   - click
   - tqdm
+  - fuzzywuzzy
+  - pygithub
   - pip:
-      - numpy
-      - matplotlib
-      - scipy
-      - pandas
+    - jupyter
+    - numpy
+    - matplotlib
+    - scipy
+    - pandas
+    - nltk
 
 # python -m pip install -U torch==1.10.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html

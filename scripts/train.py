@@ -2,6 +2,7 @@ import json
 import logging
 import operator
 import pathlib
+import re
 import sys
 import time
 from pathlib import Path
@@ -242,7 +243,9 @@ def main(
     args.dev.dst_dev_path = str(dev_path)
 
     with open(train_path, "r") as f:
-        args.train.special_tokens = json.load(f)["special_tokens"]
+        separators = json.load(f)["separators"]
+        r = re.compile(r" <.+> ")
+        args.train.special_tokens = list(map(str.strip, filter(r.match, separators.values())))
     initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
     if ckpt_path:
         args.train.checkpoint = str(ckpt_path)

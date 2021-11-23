@@ -144,10 +144,9 @@ def main():
                 data = json.load(f)
             result.update(process_file(data))
 
-    r = re.compile(r" <.+> ")
     out = {
         "data": result,
-        "special_tokens": list(map(str.strip, filter(r.match, SEPARATORS.values())))
+        "separators": SEPARATORS
     }
     with open(args.out, "w") as f:
         json.dump(out, f, indent=4, sort_keys=True)
