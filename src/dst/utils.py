@@ -1,5 +1,6 @@
 import logging
 import random
+import re
 from pathlib import Path
 
 import numpy as np
@@ -41,3 +42,18 @@ def load_checkpoint(args, device: torch.device):
     model = GPT2LMHeadModel.from_pretrained(ckpt_path)
     model.to(device)
     return model.config, tokenizer, model
+
+
+def humanise(
+        name: str,
+        remove_trailing_numbers: bool = False
+) -> str:
+    # Convert a potentially camel or snake case string to a lower case string delimited by spaces
+    # Adapted from https://stackoverflow.com/a/1176023
+    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    name = re.sub('([a-z0-9])([A-Z])', r'\1_\2', name)
+    name = name.lower().replace("_", " ")
+    if remove_trailing_numbers:
+        # Remove trailing numbers
+        name = re.sub('[0-9]+$', '', name)
+    return re.sub(' +', ' ', name).strip()
