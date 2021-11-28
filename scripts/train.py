@@ -142,7 +142,7 @@ def train(args, tokenizer, model, initial_step=0):
                 loss_dev, t = score_dev(dev_args, dev_dataloader, model)
                 dev_loss_curve.append((loss_dev, t, gstep))
                 model.train()
-                logger.info(f"Epoch: {gstep} | Dev loss: {loss_dev:.8f} | Time: {t:.3f}")
+                logger.info(f"Epoch: {epoch} | Batch: {gstep} | Dev loss: {loss_dev:.8f} | Time: {t:.3f}")
                 writer.add_scalar('Loss/dev', loss_dev, global_step=gstep * train_args.batch_size)
                 save_checkpoint(train_dev_args, tokenizer, model, gstep * train_args.batch_size)
 

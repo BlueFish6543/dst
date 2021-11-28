@@ -10,7 +10,7 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J parse
+#SBATCH -J score
 #! Which project should be charged:
 #SBATCH -A BYRNE-SL3-CPU
 #SBATCH -p icelake
@@ -24,6 +24,7 @@
 #SBATCH --time=03:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
+#SBATCH --array=0-9
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -60,11 +61,16 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
+STEPARRAY=(80000 160000 240000 320000 400000 480000 560000 640000 720000 800000)
+STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
+
 #! Full path to application executable:
-application="python -u -m scripts.parse"
+application="python -u -m scripts.score"
 
 #! Run options for the application:
-options="-d decode/experiment-1 -s data/raw/sgd/test/schema.json -t data/interim/sgd/test"
+options="--prediction_dir decode/experiment-1/model.${STEP} \
+--raw_data_dir data/raw/sgd/ --eval_set test \
+--output_metric_file decode/experiment-1/model.${STEP}/metrics.json"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
