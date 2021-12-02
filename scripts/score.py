@@ -40,7 +40,7 @@ flags.DEFINE_string(
     "raw_data_dir", None,
     "Directory for the downloaded data, which contains the dialogue files"
     " and schema files of all datasets (train, dev, test)")
-flags.DEFINE_enum("eval_set", None, ["train", "dev", "test"],
+flags.DEFINE_enum("eval_set", None, ["train", "dev", "test", "test-small"],
                   "Dataset split for evaluation.")
 flags.DEFINE_string(
     "output_metric_file", None,
