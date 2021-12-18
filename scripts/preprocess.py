@@ -78,13 +78,34 @@ def process_frame(
     slot_values_list.append(slot_values.strip())
 
 
-def process_file(data: list) -> dict:
+def get_slot_names(
+        schema: List[dict],
+        dialogue: dict
+) -> str:
+    services = list(sorted(dialogue["services"]))
+    result = ""
+    for service in schema:
+        if service["service_name"] == services[0]:
+            slot_names = list(sorted([humanise(slot["name"]) for slot in service["slots"]]))
+            result += SEPARATORS["service"] + humanise(service["service_name"], remove_trailing_numbers=True) + \
+                SEPARATORS["default"] + SEPARATORS["default"].join(slot_names)
+            services.pop(0)
+            if not services:
+                break
+    return result.strip()
+
+
+def process_file(
+        schema: List[dict],
+        data: list
+) -> dict:
     result = {}
     for dialogue in data:
         dialogue_id = dialogue["dialogue_id"]
         result[dialogue_id] = []
         system_utterance = ""
         previous_slots = {}
+        slot_names = get_slot_names(schema, dialogue)
 
         for turn in dialogue["turns"]:
             if turn["speaker"] == "SYSTEM":
@@ -108,7 +129,8 @@ def process_file(data: list) -> dict:
                     "user_utterance": user_utterance,
                     "active_intent": " ".join(sorted(active_intent_list)),
                     "requested_slots": " ".join(sorted(requested_slots_list)),
-                    "slot_values": " ".join(sorted(slot_values_list))
+                    "slot_values": " ".join(sorted(slot_values_list)),
+                    "slot_names": slot_names
                 }
                 result[dialogue_id].append(res)
 
@@ -123,13 +145,15 @@ def main():
     parser.add_argument('-o', '--out', help='Output file location and name', required=True)
     args = parser.parse_args()
 
+    with open(os.path.join(args.dir, "schema.json")) as f:
+        schema = json.load(f)
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     result = {}
     for file in os.listdir(args.dir):
         if pattern.match(file):
             with open(os.path.join(args.dir, file), "r") as f:
                 data = json.load(f)
-            result.update(process_file(data))
+            result.update(process_file(schema, data))
 
     out = {
         "data": result,

@@ -69,11 +69,13 @@ class DSTDataset(torch.utils.data.Dataset):
 
 
 class TrainDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size):
+    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False):
+        self.add_slot_names = add_slot_names
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
         self.examples = []
+        over_length = 0
         for dialogue_id, dialogue in tqdm(
                 self.data.items(),
                 desc=f"Loading {self.filename}\n",
@@ -87,7 +89,10 @@ class TrainDataset(DSTDataset):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
                 if not system_utterance:
-                    utterance = f"<USR> {user_utterance} "
+                    if self.add_slot_names:
+                        utterance = turn['slot_names'] + f" <USR> {user_utterance} "
+                    else:
+                        utterance = f"<USR> {user_utterance} "
                 else:
                     utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
                 context += utterance
@@ -103,6 +108,7 @@ class TrainDataset(DSTDataset):
                 if len(input_ids) > self.max_seq_len:
                     # Handle over-length example
                     logger.warning(f"{dialogue_id}({turn_index}) exceeds maximum sequence length, truncating...")
+                    over_length += 1
                     input_ids = input_ids[-self.max_seq_len:]
                     label_ids = label_ids[-self.max_seq_len:]
                 assert len(input_ids) <= self.max_seq_len
@@ -114,6 +120,7 @@ class TrainDataset(DSTDataset):
                     'example_id': f"{dialogue_id}_{turn_index}",
                 })
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
+        logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
@@ -133,12 +140,14 @@ class TrainDataset(DSTDataset):
 
 
 class TestDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size):
+    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False):
         self.to_decode: set[str] = set(args.decode_only)
+        self.add_slot_names = add_slot_names
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
         self.examples = []
+        over_length = 0
         for dialogue_id, dialogue in tqdm(
                 self.data.items(),
                 desc=f"Loading {self.filename}",
@@ -154,12 +163,16 @@ class TestDataset(DSTDataset):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
                 if not system_utterance:
-                    turn_utterance = f"<USR> {user_utterance} "
+                    if self.add_slot_names:
+                        utterance = turn['slot_names'] + f" <USR> {user_utterance} "
+                    else:
+                        utterance = f"<USR> {user_utterance} "
                 else:
-                    turn_utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                context += turn_utterance
+                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                context += utterance
                 dst_input_ids = self.tokenizer(context)['input_ids'] + [self.tokenizer.bos_token_id]
                 if len(dst_input_ids) > self.max_seq_len:
+                    over_length += 1
                     dst_input_ids = dst_input_ids[-self.max_seq_len:]
 
                 self.examples.append({
@@ -168,6 +181,7 @@ class TestDataset(DSTDataset):
                     'user_utterance': user_utterance,
                 })
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
+        logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]

@@ -137,7 +137,7 @@ def decode(args, batch, model, tokenizer):
 
 
 def test(args, tokenizer, model):
-    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size)
+    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size, add_slot_names=True)
     sampler = SequentialSampler(dataset)
     test_gen_dataloader = DataLoader(
         dataset,

@@ -62,8 +62,8 @@ which python
 application="python -u -m scripts.train"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd/experiment-1/train.json \
--d data/preprocessed/sgd/experiment-1/dev.json \
+options="-t data/preprocessed/sgd/experiment-2/train.json \
+-d data/preprocessed/sgd/experiment-2/dev.json \
 -a configs/train_arguments.yaml -vv"
 
 #! Work directory (i.e. where the job will run):
