@@ -208,7 +208,7 @@ def decode_checkpoint(
     _, tokenizer, model = load_checkpoint(args, device=DEVICE)
     belief_states = test(args, tokenizer, model)
     with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
-        json.dump(belief_states, f)
+        json.dump(belief_states, f, indent=4)
     return belief_states
 
 

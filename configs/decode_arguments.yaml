@@ -10,7 +10,7 @@ decode:
   # Will be suffixed by model binary file name (aka checkpoint.split("/")[-1]. Can be overridden via -hyp/--hyp_path.
   hyp_dir: 'hyps'
   # Subdirectory in hyp_dir where files are to be saved
-  experiment_name: 'experiment-1'
+  experiment_name: 'experiment-2'
   # If set to `huggingface', calls Hugging Face API during decoding for generation. Might fail by predicting same
   # token repeatedly and failing to predict <EOS>. All subsequent calls to the API fail. If this happens set the
   # flag to `custom'
