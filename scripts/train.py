@@ -18,10 +18,12 @@ from torch.utils.data import (
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import (
+    Adafactor,
     AdamW,
     AutoConfig,
     AutoTokenizer,
     GPT2LMHeadModel,
+    T5ForConditionalGeneration,
     get_linear_schedule_with_warmup,
 )
 
@@ -54,13 +56,19 @@ def score_dev(args, dataloader, model):
     for batch in tqdm(dataloader, desc="Dev", disable=args.verbose.disable_display):
         num_batches += 1
         with torch.no_grad():
-            inputs = batch['input_ids'].to(DEVICE)
-            labels = batch['label_ids'].to(DEVICE)
-            output = model(
-                input_ids=inputs,
-                attention_mask=batch['attention_mask'].to(DEVICE),
-                labels=labels,
-            )
+            if batch['decoder_ids'] is not None:
+                output = model(
+                    input_ids=batch['input_ids'].to(DEVICE),
+                    attention_mask=batch['attention_mask'].to(DEVICE),
+                    decoder_input_ids=batch['decoder_ids'].to(DEVICE),
+                    labels=batch['label_ids'].to(DEVICE)
+                )
+            else:
+                output = model(
+                    input_ids=batch['input_ids'].to(DEVICE),
+                    attention_mask=batch['attention_mask'].to(DEVICE),
+                    labels=batch['label_ids'].to(DEVICE)
+                )
         loss_total += output.loss.item()
     return loss_total / num_batches, time.time() - start_time
 
@@ -87,11 +95,22 @@ def train(args, tokenizer, model, initial_step=0):
         sampler=SequentialSampler,
         data_size=dev_args.data_size
     )
-    optimizer = AdamW(
-        model.parameters(),
-        lr=train_args.learning_rate,
-        eps=train_args.adam_eps
-    )
+    if 'gpt2' in train_args.model_name_or_path.lower():
+        optimizer = AdamW(
+            model.parameters(),
+            lr=train_args.learning_rate,
+            eps=train_args.adam_eps
+        )
+    elif 't5' in train_args.model_name_or_path.lower():
+        optimizer = Adafactor(
+            model.parameters(),
+            lr=train_args.learning_rate,
+            scale_parameter=False,
+            relative_step=False,
+            warmup_init=False
+        )
+    else:
+        raise ValueError("Unsupported model.")
     scheduler = None
     if train_args.use_scheduler:
         t_total = len(train_dataloader) // train_args.gradient_accumulation_steps * train_args.epochs
@@ -121,11 +140,19 @@ def train(args, tokenizer, model, initial_step=0):
         iterator = enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch}", disable=train_args.verbose.disable_display))
         local_step = 0
         for local_step, batch in iterator:
-            output = model(
-                input_ids=batch['input_ids'].to(DEVICE),
-                attention_mask=batch['attention_mask'].to(DEVICE),
-                labels=batch['label_ids'].to(DEVICE)
-            )
+            if batch['decoder_ids'] is not None:
+                output = model(
+                    input_ids=batch['input_ids'].to(DEVICE),
+                    attention_mask=batch['attention_mask'].to(DEVICE),
+                    decoder_input_ids=batch['decoder_ids'].to(DEVICE),
+                    labels=batch['label_ids'].to(DEVICE)
+                )
+            else:
+                output = model(
+                    input_ids=batch['input_ids'].to(DEVICE),
+                    attention_mask=batch['attention_mask'].to(DEVICE),
+                    labels=batch['label_ids'].to(DEVICE)
+                )
             loss = output.loss
             loss_disp += output.loss.item()
             gstep += 1
@@ -166,7 +193,12 @@ def set_model(args):
     vocabulary = Vocabulary()
     vocabulary.add_special_tokens(args.special_tokens)
     tokenizer.add_special_tokens(vocabulary.special_tokens)
-    model = GPT2LMHeadModel.from_pretrained(args.model_name_or_path, config=config)
+    if 'gpt2' in args.model_name_or_path.lower():
+        model = GPT2LMHeadModel.from_pretrained(args.model_name_or_path, config=config)
+    elif 't5' in args.model_name_or_path.lower():
+        model = T5ForConditionalGeneration.from_pretrained(args.model_name_or_path, config=config)
+    else:
+        raise ValueError("Unsupported model.")
     model.resize_token_embeddings(len(tokenizer))
     model.to(DEVICE)
     return config, tokenizer, model
