@@ -119,7 +119,6 @@ def decode(args, batch, model, tokenizer):
                 pad_token_id=tokenizer.pad_token_id,
                 early_stopping=True,
             )
-            output = tokenizer.decode(output[0])  # includes context fed into model
         elif args.generate_api == 'custom':
             output = sequential_generation(args, batch, model, tokenizer)
         else:

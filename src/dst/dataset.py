@@ -43,6 +43,7 @@ class DSTDataset(torch.utils.data.Dataset):
         self.tokenizer = tokenizer
         self.filename = filename
         self.pad_id = tokenizer.pad_token_id  # pad to max example length
+        self.eos_id = tokenizer.eos_token_id
         self.ignore_token_id = -100
         self.max_seq_len = args.max_seq_len
         with open(filename, 'r') as f:
@@ -95,43 +96,27 @@ class TrainDataset(DSTDataset):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
 
-                if 'gpt2' in self.args.model_name_or_path.lower():
-                    if not system_utterance:
-                        if self.add_slot_names:
-                            utterance = turn['slot_names'] + f" <USR> {user_utterance} "
-                        else:
-                            utterance = f"<USR> {user_utterance} "
+                if not system_utterance:
+                    if self.add_slot_names:
+                        utterance = slot_values + f" <USR> {user_utterance} "
                     else:
-                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                    context += utterance
-                    context_ids = self.tokenizer(context)['input_ids']
-                    target_ids = self.tokenizer(slot_values)['input_ids']
-                    target_len = len(target_ids)
+                        utterance = f"<USR> {user_utterance} "
+                else:
+                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                context += utterance
+                context_ids = self.tokenizer(context)['input_ids']
+                target_ids = self.tokenizer(slot_values)['input_ids']
+                target_len = len(target_ids)
 
+                if 'gpt2' in self.args.model_name_or_path.lower():
                     # context <BOS> target <EOS>
                     input_ids = context_ids + [self.tokenizer.bos_token_id] + target_ids + [self.tokenizer.eos_token_id]
                     pad_len = len(input_ids) - target_len - 1  # EOS token
                     label_ids = [self.ignore_token_id] * pad_len + target_ids + [self.tokenizer.eos_token_id]
                     assert len(input_ids) == len(label_ids)
-                    decoder_ids = None
-
                 elif 't5' in self.args.model_name_or_path.lower():
-                    if not system_utterance:
-                        utterance = f"<USR> {user_utterance} "
-                    else:
-                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                    context += utterance
-                    context_ids = self.tokenizer(context)['input_ids']
-                    decoder_ids = self.tokenizer(turn['slot_names'])['input_ids'][:-1]  # discard last end token
-                    target_ids = self.tokenizer(slot_values)['input_ids']
-                    target_len = len(target_ids)
-
                     input_ids = context_ids
-                    decoder_ids += [self.tokenizer.pad_token_id] + target_ids  # T5 uses pad token as start token
-                    pad_len = len(decoder_ids) - target_len
-                    label_ids = [self.ignore_token_id] * pad_len + target_ids
-                    assert len(decoder_ids) == len(label_ids)
-
+                    label_ids = target_ids
                 else:
                     raise ValueError("Unsupported model.")
 
@@ -145,7 +130,6 @@ class TrainDataset(DSTDataset):
 
                 self.examples.append({
                     'input_ids': input_ids,
-                    'decoder_ids': decoder_ids,
                     'label_ids': label_ids,
                     'user_utterance': user_utterance,  # useful for results analysis
                     'example_id': f"{dialogue_id}_{turn_index}",
@@ -158,25 +142,14 @@ class TrainDataset(DSTDataset):
         input_ids, attention_mask = self._pad(input_ids, self.pad_id)
         input_ids = torch.tensor(input_ids).long()
         attention_mask = torch.tensor(attention_mask).long()
-        if 'gpt2' in self.args.model_name_or_path.lower():
-            decoder_ids = None
-            label_ids = [example['label_ids'] for example in batch]
-            label_ids, _ = self._pad(label_ids, self.ignore_token_id)
-            label_ids = torch.tensor(label_ids).long()
-        elif 't5' in self.args.model_name_or_path.lower():
-            decoder_ids = [example['decoder_ids'] for example in batch]
-            decoder_ids, _ = self._pad(decoder_ids, self.pad_id, side="left")
-            decoder_ids = torch.tensor(decoder_ids).long()
-            label_ids = [example['label_ids'] for example in batch]
-            label_ids, _ = self._pad(label_ids, self.ignore_token_id, side="left")
-            label_ids = torch.tensor(label_ids).long()
-        else:
-            raise ValueError("Unknown model.")
+        label_ids = [example['label_ids'] for example in batch]
+        label_ids, _ = self._pad(label_ids, self.ignore_token_id)
+        label_ids = torch.tensor(label_ids).long()
         user_utterances = [example['user_utterance'] for example in batch]
+
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
-            'decoder_ids': decoder_ids,
             'label_ids': label_ids,
             'user_utterance': user_utterances
         }
@@ -203,17 +176,28 @@ class TestDataset(DSTDataset):
             context = ""
 
             for turn_index, turn in enumerate(dialogue):
+                slot_values = turn['slot_values']
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
+
                 if not system_utterance:
                     if self.add_slot_names:
-                        utterance = turn['slot_names'] + f" <USR> {user_utterance} "
+                        utterance = slot_values + f" <USR> {user_utterance} "
                     else:
                         utterance = f"<USR> {user_utterance} "
                 else:
                     utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
                 context += utterance
-                dst_input_ids = self.tokenizer(context)['input_ids'] + [self.tokenizer.bos_token_id]
+                context_ids = self.tokenizer(context)['input_ids']
+
+                if 'gpt2' in self.args.model_name_or_path.lower():
+                    # context <BOS> target <EOS>
+                    dst_input_ids = context_ids + [self.tokenizer.bos_token_id]
+                elif 't5' in self.args.model_name_or_path.lower():
+                    dst_input_ids = context_ids
+                else:
+                    raise ValueError("Unsupported model.")
+
                 if len(dst_input_ids) > self.max_seq_len:
                     over_length += 1
                     dst_input_ids = dst_input_ids[-self.max_seq_len:]

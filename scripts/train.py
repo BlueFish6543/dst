@@ -56,19 +56,11 @@ def score_dev(args, dataloader, model):
     for batch in tqdm(dataloader, desc="Dev", disable=args.verbose.disable_display):
         num_batches += 1
         with torch.no_grad():
-            if batch['decoder_ids'] is not None:
-                output = model(
-                    input_ids=batch['input_ids'].to(DEVICE),
-                    attention_mask=batch['attention_mask'].to(DEVICE),
-                    decoder_input_ids=batch['decoder_ids'].to(DEVICE),
-                    labels=batch['label_ids'].to(DEVICE)
-                )
-            else:
-                output = model(
-                    input_ids=batch['input_ids'].to(DEVICE),
-                    attention_mask=batch['attention_mask'].to(DEVICE),
-                    labels=batch['label_ids'].to(DEVICE)
-                )
+            output = model(
+                input_ids=batch['input_ids'].to(DEVICE),
+                attention_mask=batch['attention_mask'].to(DEVICE),
+                labels=batch['label_ids'].to(DEVICE)
+            )
         loss_total += output.loss.item()
     return loss_total / num_batches, time.time() - start_time
 
@@ -140,19 +132,11 @@ def train(args, tokenizer, model, initial_step=0):
         iterator = enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch}", disable=train_args.verbose.disable_display))
         local_step = 0
         for local_step, batch in iterator:
-            if batch['decoder_ids'] is not None:
-                output = model(
-                    input_ids=batch['input_ids'].to(DEVICE),
-                    attention_mask=batch['attention_mask'].to(DEVICE),
-                    decoder_input_ids=batch['decoder_ids'].to(DEVICE),
-                    labels=batch['label_ids'].to(DEVICE)
-                )
-            else:
-                output = model(
-                    input_ids=batch['input_ids'].to(DEVICE),
-                    attention_mask=batch['attention_mask'].to(DEVICE),
-                    labels=batch['label_ids'].to(DEVICE)
-                )
+            output = model(
+                input_ids=batch['input_ids'].to(DEVICE),
+                attention_mask=batch['attention_mask'].to(DEVICE),
+                labels=batch['label_ids'].to(DEVICE),
+            )
             loss = output.loss
             loss_disp += output.loss.item()
             gstep += 1
