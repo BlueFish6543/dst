@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from transformers import AutoTokenizer, GPT2LMHeadModel, T5ForConditionalGeneration
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGeneration, T5Tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,11 @@ def save_checkpoint(args, tokenizer, model, step):
 def load_checkpoint(args, device: torch.device):
     ckpt_path = args.checkpoint
     logger.info(f"Load model, tokenizer from {ckpt_path}")
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_path)
     if 'gpt2' in args.model_name_or_path.lower():
+        tokenizer = GPT2Tokenizer.from_pretrained(ckpt_path)
         model = GPT2LMHeadModel.from_pretrained(ckpt_path)
     elif 't5' in args.model_name_or_path.lower():
+        tokenizer = T5Tokenizer.from_pretrained(ckpt_path)
         model = T5ForConditionalGeneration.from_pretrained(ckpt_path)
     else:
         raise ValueError("Unsupported model.")

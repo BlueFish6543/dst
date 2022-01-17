@@ -21,9 +21,10 @@ from transformers import (
     Adafactor,
     AdamW,
     AutoConfig,
-    AutoTokenizer,
     GPT2LMHeadModel,
+    GPT2Tokenizer,
     T5ForConditionalGeneration,
+    T5Tokenizer,
     get_linear_schedule_with_warmup,
 )
 
@@ -173,16 +174,17 @@ def train(args, tokenizer, model, initial_step=0):
 def set_model(args):
     # Initiate config, tokeniser and model
     config = AutoConfig.from_pretrained(args.model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-    vocabulary = Vocabulary()
-    vocabulary.add_special_tokens(args.special_tokens)
-    tokenizer.add_special_tokens(vocabulary.special_tokens)
     if 'gpt2' in args.model_name_or_path.lower():
+        tokenizer = GPT2Tokenizer.from_pretrained(args.model_name_or_path)
         model = GPT2LMHeadModel.from_pretrained(args.model_name_or_path, config=config)
     elif 't5' in args.model_name_or_path.lower():
+        tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
         model = T5ForConditionalGeneration.from_pretrained(args.model_name_or_path, config=config)
     else:
         raise ValueError("Unsupported model.")
+    vocabulary = Vocabulary()
+    vocabulary.add_special_tokens(args.special_tokens)
+    tokenizer.add_special_tokens(vocabulary.special_tokens)
     model.resize_token_embeddings(len(tokenizer))
     model.to(DEVICE)
     return config, tokenizer, model

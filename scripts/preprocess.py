@@ -9,6 +9,7 @@ from src.dst.utils import humanise
 
 SEPARATORS = {
     "service": " <SVC> ",
+    "description": " : ",
     "default": " <SEP> ",
     "slot-value": " = "
 }
@@ -32,10 +33,11 @@ def process_frame(
         requested_slots_list: list,
         slot_values_list: list,
         previous_slots: dict,
+        slot_dict: dict,
         system_utterance: str,
         user_utterance: str
 ):
-    service = humanise(frame["service"], remove_trailing_numbers=True)
+    service = humanise(frame["service"])
     state = frame["state"]
 
     # <SVC> service <SEP> intent
@@ -68,6 +70,10 @@ def process_frame(
     # Update
     previous_slots[service] = current_slots
 
+    # Update slot_dict
+    for slot, value in current_slots.items():
+        slot_dict[service][slot]["value"] = value
+
     # <SVC> service <SEP> slot1 = value1 <SEP> slot2 = value2
     current_slots = map(
         lambda item: item[0] + SEPARATORS["slot-value"] + item[1],
@@ -80,19 +86,45 @@ def process_frame(
 
 def get_slot_names(
         schema: List[dict],
-        dialogue: dict
+        turn: dict
 ) -> str:
-    services = list(sorted(dialogue["services"]))
+    services = [frame["service"] for frame in turn["frames"]]
     result = ""
     for service in schema:
         if service["service_name"] == services[0]:
             slot_names = list(sorted([humanise(slot["name"]) for slot in service["slots"]]))
-            result += SEPARATORS["service"] + humanise(service["service_name"], remove_trailing_numbers=True) + \
+            result += SEPARATORS["service"] + humanise(service["service_name"]) + \
                 SEPARATORS["default"] + SEPARATORS["default"].join(slot_names)
             services.pop(0)
             if not services:
                 break
     return result.strip()
+
+
+def get_slots(
+        schema: List[dict],
+        turn: dict
+) -> dict:
+    services = list(sorted([frame["service"] for frame in turn["frames"]]))
+    result = {}
+    for service in schema:
+        if service["service_name"] == services[0]:
+            service_name = humanise(service["service_name"])
+            result[service_name] = {}
+            for slot in service["slots"]:
+                # <SVC> service <SEP> slot : description
+                slot_name = humanise(slot["name"])
+                description = SEPARATORS["service"] + service_name + \
+                    SEPARATORS["default"] + slot_name + SEPARATORS["description"] + \
+                    slot["description"]
+                result[service_name][slot_name] = {
+                    "description": description.strip(),
+                    "value": ""
+                }
+            services.pop(0)
+            if not services:
+                break
+    return result
 
 
 def process_file(
@@ -105,7 +137,6 @@ def process_file(
         result[dialogue_id] = []
         system_utterance = ""
         previous_slots = {}
-        slot_names = get_slot_names(schema, dialogue)
 
         for turn in dialogue["turns"]:
             if turn["speaker"] == "SYSTEM":
@@ -113,6 +144,8 @@ def process_file(
                 # We don't need to do anything else
 
             elif turn["speaker"] == "USER":
+                slot_names = get_slot_names(schema, turn)
+                slot_dict = get_slots(schema, turn)
                 user_utterance = turn["utterance"]
                 # These lists accumulate across frames
                 active_intent_list = []
@@ -122,7 +155,7 @@ def process_file(
                     # Each frame represents one service (?)
                     process_frame(frame,
                                   active_intent_list, requested_slots_list, slot_values_list,
-                                  previous_slots, system_utterance, user_utterance)
+                                  previous_slots, slot_dict, system_utterance, user_utterance)
 
                 res = {
                     "system_utterance": system_utterance,
@@ -130,7 +163,8 @@ def process_file(
                     "active_intent": " ".join(sorted(active_intent_list)),
                     "requested_slots": " ".join(sorted(requested_slots_list)),
                     "slot_values": " ".join(sorted(slot_values_list)),
-                    "slot_names": slot_names
+                    "slot_names": slot_names,
+                    "slot_dict": slot_dict
                 }
                 result[dialogue_id].append(res)
 
