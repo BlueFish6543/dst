@@ -62,24 +62,31 @@ def populate_slot_values(
         template_dialogue: dict,
         dialogue_id: str,
         separators: dict,
-        schema: dict
+        schema: dict,
+        model_name: str
 ):
     for i, predicted_str in enumerate(predicted_data["bs_str"]):
         template_turn = template_dialogue["turns"][i * 2]  # skip system turns
         assert template_turn["speaker"] == "USER"
-        try:
-            # Should contain the dialogue history
-            # We call replace() to avoid issues with extra whitespace
-            assert template_turn["utterance"].replace(" ", "") in predicted_str.replace(" ", "")
-        except AssertionError:
-            logger.warning(f"{predicted_str} in {dialogue_id}_{i} does not match user utterance. Skipping.")
-            continue
+        if 'gpt2' in model_name.lower():
+            try:
+                # Should contain the dialogue history
+                # We call replace() to avoid issues with extra whitespace
+                assert template_turn["utterance"].replace(" ", "") in predicted_str.replace(" ", "")
+            except AssertionError:
+                logger.warning(f"{predicted_str} in {dialogue_id}_{i} does not match user utterance. Skipping.")
+                continue
         if "<EOS>" not in predicted_str:
             logger.warning(f"No <EOS> token in {dialogue_id}_{i}. Skipping.")
             continue
 
         # Extract string between <BOS> and <EOS>
-        predicted_str = re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1)
+        if 'gpt2' in model_name.lower():
+            predicted_str = re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1)
+        elif 't5' in model_name.lower():
+            predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
+        else:
+            raise ValueError("Unsupported model.")
         # Accumulate services and slots
         predicted_state = build_predicted_state(predicted_str, i, dialogue_id, separators)
 
@@ -113,6 +120,7 @@ def parse(
     # Load separators
     with open(os.path.join(root, "experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
+        model_name = config.decode.model_name_or_path
     with open(os.path.join(os.getcwd(), config.decode.dst_test_path), "r") as f:
         separators = json.load(f)["separators"]
 
@@ -129,7 +137,7 @@ def parse(
                     except KeyError:
                         logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
                         continue
-                    populate_slot_values(data, dialogue, dialogue_id, separators, schema)
+                    populate_slot_values(data, dialogue, dialogue_id, separators, schema, model_name)
             with open(os.path.join(root, file), "w") as f:
                 json.dump(dialogues, f, indent=4)
 

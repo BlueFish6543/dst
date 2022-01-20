@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_dataloader(args, tokenizer, filename, sampler, data_size=-1):
-    dataset = TrainDataset(args, tokenizer, filename, data_size, add_slot_names=True)
+    dataset = TrainDataset(args, tokenizer, filename, data_size, per_slot=True)
     dataloader = DataLoader(
         dataset,
         sampler=sampler(dataset),

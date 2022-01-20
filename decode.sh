@@ -59,16 +59,17 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
-STEPARRAY=(80000 160000 240000 320000 400000 480000 560000 640000 720000 800000)
+#STEPARRAY=(80000 160000 240000 320000 400000 480000 560000 640000 720000 800000)
+STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
 STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
 
 #! Full path to application executable:
 application="python -u -m scripts.decode"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd/experiment-2/test-small.json \
+options="-t data/preprocessed/sgd/experiment-4/test.json \
 -a configs/decode_arguments.yaml \
--c models/experiment-3/model.${STEP} -hyp decode/ -vv"
+-c models/experiment-4/model.${STEP} -hyp decode/ -vv"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

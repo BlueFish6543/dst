@@ -145,27 +145,23 @@ def test(args, tokenizer, model):
         collate_fn=dataset.collate_fn
     )
     model.eval()
-    collector = defaultdict(list)
+    collector = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     with torch.no_grad():
         iterator = enumerate(tqdm(test_gen_dataloader, desc="Test", disable=args.verbose.disable_display))
         for step, batch in iterator:
             dialogue_id, turn_idx = batch['example_id'][0].rsplit("_", 1)
             bs_pred_str = decode(args, batch, model, tokenizer)
             usr_utterance = batch['user_utterance'][0]
-            collector[dialogue_id].append(
-                (bs_pred_str, usr_utterance, int(turn_idx))
-            )
+            service = batch['service'][0]
+            slot = batch['slot'][0]
+            if service is None or slot is None:
+                collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
+                collector[dialogue_id][turn_idx]["bs_pred_str"] = bs_pred_str
+            else:
+                collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
+                collector[dialogue_id][turn_idx][service][slot] = bs_pred_str
 
-    for key, values in collector.items():
-        values.sort(key=operator.itemgetter(2))
-
-    belief_states = {
-        dialogue_id: {
-            'bs_str': [info[0] for info in collector[dialogue_id]],
-            'utterances': [info[1] for info in collector[dialogue_id]]
-        } for dialogue_id in collector
-    }
-    return belief_states
+    return dict(collector)
 
 
 def decode_checkpoint(

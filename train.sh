@@ -22,7 +22,7 @@
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
 #SBATCH --gres=gpu:4
 #! How much wallclock time will be required?
-#SBATCH --time=12:00:00
+#SBATCH --time=18:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
 #! Uncomment this to prevent the job from being requeued (e.g. if
@@ -62,8 +62,8 @@ which python
 application="python -u -m scripts.train"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd/experiment-2/train.json \
--d data/preprocessed/sgd/experiment-2/dev.json \
+options="-t data/preprocessed/sgd/experiment-4/train.json \
+-d data/preprocessed/sgd/experiment-4/dev.json \
 -a configs/train_arguments.yaml -vv"
 
 #! Work directory (i.e. where the job will run):

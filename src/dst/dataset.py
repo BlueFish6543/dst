@@ -76,8 +76,9 @@ class DSTDataset(torch.utils.data.Dataset):
 
 
 class TrainDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False):
+    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False, per_slot=False):
         self.add_slot_names = add_slot_names
+        self.per_slot = per_slot
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
@@ -92,50 +93,72 @@ class TrainDataset(DSTDataset):
                 break
             context = ""
             for turn_index, turn in enumerate(dialogue):
-                slot_values = turn['slot_values']
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
 
-                if not system_utterance:
-                    if self.add_slot_names:
-                        utterance = slot_values + f" <USR> {user_utterance} "
-                    else:
+                if self.per_slot:
+                    # Iterate per slot
+                    if not system_utterance:
                         utterance = f"<USR> {user_utterance} "
+                    else:
+                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                    context += utterance
+                    for service in turn['slot_dict']:
+                        for slot in turn['slot_dict'][service]:
+                            description = turn['slot_dict'][service][slot]["description"]
+                            value = turn['slot_dict'][service][slot]["value"]
+                            context_ids = self.tokenizer(description + " " + context)['input_ids']
+                            target_ids = self.tokenizer(value)['input_ids']
+                            over_length = self.create_ids(
+                                dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
+
                 else:
-                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                context += utterance
-                context_ids = self.tokenizer(context)['input_ids']
-                target_ids = self.tokenizer(slot_values)['input_ids']
-                target_len = len(target_ids)
+                    # Everything in one string
+                    slot_values = turn['slot_values']
+                    if not system_utterance:
+                        if self.add_slot_names:
+                            utterance = slot_values + f" <USR> {user_utterance} "
+                        else:
+                            utterance = f"<USR> {user_utterance} "
+                    else:
+                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                    context += utterance
+                    context_ids = self.tokenizer(context)['input_ids']
+                    target_ids = self.tokenizer(slot_values)['input_ids']
+                    over_length = self.create_ids(
+                        dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
 
-                if 'gpt2' in self.args.model_name_or_path.lower():
-                    # context <BOS> target <EOS>
-                    input_ids = context_ids + [self.tokenizer.bos_token_id] + target_ids + [self.tokenizer.eos_token_id]
-                    pad_len = len(input_ids) - target_len - 1  # EOS token
-                    label_ids = [self.ignore_token_id] * pad_len + target_ids + [self.tokenizer.eos_token_id]
-                    assert len(input_ids) == len(label_ids)
-                elif 't5' in self.args.model_name_or_path.lower():
-                    input_ids = context_ids
-                    label_ids = target_ids
-                else:
-                    raise ValueError("Unsupported model.")
-
-                if len(input_ids) > self.max_seq_len:
-                    # Handle over-length example
-                    logger.warning(f"{dialogue_id}({turn_index}) exceeds maximum sequence length, truncating...")
-                    over_length += 1
-                    input_ids = input_ids[-self.max_seq_len:]
-                    label_ids = label_ids[-self.max_seq_len:]
-                assert len(input_ids) <= self.max_seq_len
-
-                self.examples.append({
-                    'input_ids': input_ids,
-                    'label_ids': label_ids,
-                    'user_utterance': user_utterance,  # useful for results analysis
-                    'example_id': f"{dialogue_id}_{turn_index}",
-                })
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
         logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
+
+    def create_ids(self, dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length):
+        target_len = len(target_ids)
+        if 'gpt2' in self.args.model_name_or_path.lower():
+            # context <BOS> target <EOS>
+            input_ids = context_ids + [self.tokenizer.bos_token_id] + target_ids + [self.tokenizer.eos_token_id]
+            pad_len = len(input_ids) - target_len - 1  # EOS token
+            label_ids = [self.ignore_token_id] * pad_len + target_ids + [self.tokenizer.eos_token_id]
+            assert len(input_ids) == len(label_ids)
+        elif 't5' in self.args.model_name_or_path.lower():
+            input_ids = context_ids
+            label_ids = target_ids
+        else:
+            raise ValueError("Unsupported model.")
+
+        if len(input_ids) > self.max_seq_len:
+            # Handle over-length example
+            logger.warning(f"{dialogue_id}({turn_index}) exceeds maximum sequence length, truncating...")
+            over_length += 1
+            input_ids = input_ids[-self.max_seq_len:]
+            label_ids = label_ids[-self.max_seq_len:]
+        assert len(input_ids) <= self.max_seq_len
+        self.examples.append({
+            'input_ids': input_ids,
+            'label_ids': label_ids,
+            'user_utterance': user_utterance,  # useful for results analysis
+            'example_id': f"{dialogue_id}_{turn_index}",
+        })
+        return over_length
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
@@ -156,9 +179,10 @@ class TrainDataset(DSTDataset):
 
 
 class TestDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False):
+    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False, per_slot=False):
         self.to_decode: set[str] = set(args.decode_only)
         self.add_slot_names = add_slot_names
+        self.per_slot = per_slot
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
@@ -176,39 +200,62 @@ class TestDataset(DSTDataset):
             context = ""
 
             for turn_index, turn in enumerate(dialogue):
-                slot_values = turn['slot_values']
+
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
 
-                if not system_utterance:
-                    if self.add_slot_names:
-                        utterance = slot_values + f" <USR> {user_utterance} "
-                    else:
+                if self.per_slot:
+                    # Iterate per slot
+                    if not system_utterance:
                         utterance = f"<USR> {user_utterance} "
+                    else:
+                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                    context += utterance
+                    for service in turn['slot_dict']:
+                        for slot in turn['slot_dict'][service]:
+                            description = turn['slot_dict'][service][slot]["description"]
+                            context_ids = self.tokenizer(description + " " + context)['input_ids']
+                            over_length = self.create_ids(
+                                dialogue_id, turn_index, context_ids, user_utterance, over_length,
+                                service=service, slot=slot)
+
                 else:
-                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                context += utterance
-                context_ids = self.tokenizer(context)['input_ids']
+                    # Everything in one string
+                    slot_values = turn['slot_values']
+                    if not system_utterance:
+                        if self.add_slot_names:
+                            utterance = slot_values + f" <USR> {user_utterance} "
+                        else:
+                            utterance = f"<USR> {user_utterance} "
+                    else:
+                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                    context += utterance
+                    context_ids = self.tokenizer(context)['input_ids']
+                    over_length = self.create_ids(dialogue_id, turn_index, context_ids, user_utterance, over_length)
 
-                if 'gpt2' in self.args.model_name_or_path.lower():
-                    # context <BOS> target <EOS>
-                    dst_input_ids = context_ids + [self.tokenizer.bos_token_id]
-                elif 't5' in self.args.model_name_or_path.lower():
-                    dst_input_ids = context_ids
-                else:
-                    raise ValueError("Unsupported model.")
-
-                if len(dst_input_ids) > self.max_seq_len:
-                    over_length += 1
-                    dst_input_ids = dst_input_ids[-self.max_seq_len:]
-
-                self.examples.append({
-                    'input_ids': dst_input_ids,
-                    'example_id': f"{dialogue_id}_{turn_index}",
-                    'user_utterance': user_utterance,
-                })
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
         logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
+
+    def create_ids(self, dialogue_id, turn_index, context_ids, user_utterance, over_length,
+                   service=None, slot=None):
+        if 'gpt2' in self.args.model_name_or_path.lower():
+            # context <BOS> target <EOS>
+            dst_input_ids = context_ids + [self.tokenizer.bos_token_id]
+        elif 't5' in self.args.model_name_or_path.lower():
+            dst_input_ids = context_ids
+        else:
+            raise ValueError("Unsupported model.")
+        if len(dst_input_ids) > self.max_seq_len:
+            over_length += 1
+            dst_input_ids = dst_input_ids[-self.max_seq_len:]
+        self.examples.append({
+            'input_ids': dst_input_ids,
+            'example_id': f"{dialogue_id}_{turn_index}",
+            'user_utterance': user_utterance,
+            'service': service,
+            'slot': slot
+        })
+        return over_length
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
