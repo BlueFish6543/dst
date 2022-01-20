@@ -61,36 +61,16 @@ def populate_slot_values(
         predicted_data: dict,
         template_dialogue: dict,
         dialogue_id: str,
-        separators: dict,
         schema: dict,
         model_name: str
 ):
-    for i, predicted_str in enumerate(predicted_data["bs_str"]):
-        template_turn = template_dialogue["turns"][i * 2]  # skip system turns
+    for i in predicted_data:
+        # Loop over turns
+        template_turn = template_dialogue["turns"][int(i) * 2]  # skip system turns
         assert template_turn["speaker"] == "USER"
-        if 'gpt2' in model_name.lower():
-            try:
-                # Should contain the dialogue history
-                # We call replace() to avoid issues with extra whitespace
-                assert template_turn["utterance"].replace(" ", "") in predicted_str.replace(" ", "")
-            except AssertionError:
-                logger.warning(f"{predicted_str} in {dialogue_id}_{i} does not match user utterance. Skipping.")
-                continue
-        if "<EOS>" not in predicted_str:
-            logger.warning(f"No <EOS> token in {dialogue_id}_{i}. Skipping.")
-            continue
-
-        # Extract string between <BOS> and <EOS>
-        if 'gpt2' in model_name.lower():
-            predicted_str = re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1)
-        elif 't5' in model_name.lower():
-            predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
-        else:
-            raise ValueError("Unsupported model.")
-        # Accumulate services and slots
-        predicted_state = build_predicted_state(predicted_str, i, dialogue_id, separators)
 
         for frame in template_turn["frames"]:
+            # Loop over frames (services)
             # Get schema from schema.json
             service = frame["service"]
             service_schema = None
@@ -99,17 +79,35 @@ def populate_slot_values(
                     service_schema = s
                     break
             assert service_schema is not None
+            humanised_service_name = humanise(service)
 
-            # Find the best matching service
-            best_match_service = extract_best_match_service(predicted_state, service_schema)
-            if best_match_service is None:
-                continue
-            # Populate slots
             for slot_name in [slot["name"] for slot in service_schema["slots"]]:
-                humanised_name = humanise(slot_name)
-                if humanised_name in predicted_state[best_match_service]:
-                    # Add to frame
-                    frame["state"]["slot_values"][slot_name] = [predicted_state[best_match_service][humanised_name]]
+                # Loop over slots
+                humanised_slot_name = humanise(slot_name)
+                predicted_str = predicted_data[i][humanised_service_name][humanised_slot_name]
+                # Some checks
+                if 'gpt2' in model_name.lower():
+                    try:
+                        # Should contain the dialogue history
+                        # We call replace() to avoid issues with extra whitespace
+                        assert template_turn["utterance"].replace(" ", "") in predicted_str.replace(" ", "")
+                    except AssertionError:
+                        logger.warning(f"{predicted_str} in {dialogue_id}_{i} does not match user utterance. Skipping.")
+                        continue
+                if "<EOS>" not in predicted_str:
+                    logger.warning(f"No <EOS> token in {dialogue_id}_{i}. Skipping.")
+                    continue
+
+                # Extract string between <BOS> and <EOS>
+                if 'gpt2' in model_name.lower():
+                    predicted_str = re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1).strip()
+                elif 't5' in model_name.lower():
+                    predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
+                else:
+                    raise ValueError("Unsupported model.")
+                # Add to frame if not empty string
+                if predicted_str:
+                    frame["state"]["slot_values"][slot_name] = [predicted_str]
 
 
 def parse(
@@ -121,8 +119,8 @@ def parse(
     with open(os.path.join(root, "experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
         model_name = config.decode.model_name_or_path
-    with open(os.path.join(os.getcwd(), config.decode.dst_test_path), "r") as f:
-        separators = json.load(f)["separators"]
+    # with open(os.path.join(os.getcwd(), config.decode.dst_test_path), "r") as f:
+    #     separators = json.load(f)["separators"]
 
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in os.listdir(root):
@@ -137,7 +135,7 @@ def parse(
                     except KeyError:
                         logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
                         continue
-                    populate_slot_values(data, dialogue, dialogue_id, separators, schema, model_name)
+                    populate_slot_values(data, dialogue, dialogue_id, schema, model_name)
             with open(os.path.join(root, file), "w") as f:
                 json.dump(dialogues, f, indent=4)
 
