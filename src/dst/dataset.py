@@ -198,9 +198,7 @@ class TestDataset(DSTDataset):
             if self.data_size != -1 and len(self.examples) >= self.data_size:
                 break
             context = ""
-
             for turn_index, turn in enumerate(dialogue):
-
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
 
@@ -264,11 +262,15 @@ class TestDataset(DSTDataset):
         attention_mask = torch.tensor(attention_mask).long()
         example_id = [example['example_id'] for example in batch]
         user_utterances = [example['user_utterance'] for example in batch]
+        services = [example['service'] for example in batch]
+        slots = [example['slot'] for example in batch]
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
             'example_id': example_id,
-            'user_utterance': user_utterances
+            'user_utterance': user_utterances,
+            'service': services,
+            'slot': slots
         }
 
 
