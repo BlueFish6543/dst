@@ -19,7 +19,7 @@ train:
   # Path where checkpoints are *saved*
   checkpoint_dir: 'models'
   # If populated, the checkpoints are saved under checkpoint_dir/experiment_name
-  experiment_name: 'experiment-4'
+  experiment_name: 'experiment-5'
   # Populate if the training is restarted from checkpoint
   checkpoint: ''
   verbose:

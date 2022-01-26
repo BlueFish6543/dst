@@ -11,7 +11,9 @@ SEPARATORS = {
     "service": " <SVC> ",
     "description": " : ",
     "default": " <SEP> ",
-    "slot-value": " = "
+    "slot-value": " = ",
+    "slot": " <SLT> ",
+    "values": " <VAL> "
 }
 
 
@@ -110,13 +112,18 @@ def get_slots(
     for service in schema:
         if service["service_name"] == services[0]:
             service_name = humanise(service["service_name"])
+            service_description = service["description"]
             result[service_name] = {}
             for slot in service["slots"]:
-                # <SVC> service <SEP> slot : description
+                # <SVC> service : description <SLT> slot : description
                 slot_name = humanise(slot["name"])
                 description = SEPARATORS["service"] + service_name + \
-                    SEPARATORS["default"] + slot_name + SEPARATORS["description"] + \
-                    slot["description"]
+                    SEPARATORS["description"] + service_description + \
+                    SEPARATORS["slot"] + slot_name + \
+                    SEPARATORS["description"] + slot["description"]
+                if slot["is_categorical"]:
+                    # <SVC> service: description <SLT> slot : description <VAL> val1 <SEP> val2
+                    description += SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
                 result[service_name][slot_name] = {
                     "description": description.strip(),
                     "value": ""
