@@ -196,12 +196,25 @@ def main():
                 data = json.load(f)
             result.update(process_file(schema, data))
 
-    out = {
-        "data": result,
-        "separators": SEPARATORS
-    }
-    with open(args.out, "w") as f:
-        json.dump(out, f, indent=4, sort_keys=True)
+    total_slots = 0
+    empty_slots = 0
+    for dialogue in result:
+        for turn in result[dialogue]:
+            for service in turn["slot_dict"]:
+                for slot in turn["slot_dict"][service]:
+                    total_slots += 1
+                    if not turn["slot_dict"][service][slot]["value"]:
+                        empty_slots += 1
+    print("Total slots: {}".format(total_slots))
+    print("Empty slots: {}".format(empty_slots))
+    print("Proportion of empty slots: {}".format(empty_slots / total_slots))
+
+    # out = {
+    #     "data": result,
+    #     "separators": SEPARATORS
+    # }
+    # with open(args.out, "w") as f:
+    #     json.dump(out, f, indent=4, sort_keys=True)
 
 
 if __name__ == '__main__':
