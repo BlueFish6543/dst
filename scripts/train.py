@@ -66,7 +66,8 @@ def score_dev(args, dataloader, model):
     return loss_total / num_batches, time.time() - start_time
 
 
-def train(args, tokenizer, model, initial_step=0):
+def train(args, tokenizer, model, train_dataloader, dev_dataloader,
+          optimizer, scheduler, initial_step=0):
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
     log_dir = Path().resolve().joinpath("runs/{}".format(train_args.experiment_name))
@@ -74,44 +75,7 @@ def train(args, tokenizer, model, initial_step=0):
         log_dir=str(log_dir),
     )
     logger.info(f"Tensorboard logs saved at: {log_dir}")
-    train_dataloader = get_dataloader(
-        train_args,
-        tokenizer,
-        train_args.dst_train_path,
-        sampler=RandomSampler,
-        data_size=train_args.data_size
-    )
-    dev_dataloader = get_dataloader(
-        dev_args,
-        tokenizer,
-        dev_args.dst_dev_path,
-        sampler=SequentialSampler,
-        data_size=dev_args.data_size
-    )
-    if 'gpt2' in train_args.model_name_or_path.lower():
-        optimizer = AdamW(
-            model.parameters(),
-            lr=train_args.learning_rate,
-            eps=train_args.adam_eps
-        )
-    elif 't5' in train_args.model_name_or_path.lower():
-        optimizer = Adafactor(
-            model.parameters(),
-            lr=train_args.learning_rate,
-            scale_parameter=False,
-            relative_step=False,
-            warmup_init=False
-        )
-    else:
-        raise ValueError("Unsupported model.")
-    scheduler = None
-    if train_args.use_scheduler:
-        t_total = len(train_dataloader) // train_args.gradient_accumulation_steps * train_args.epochs
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=train_args.warmup_steps,
-            num_training_steps=t_total
-        )
+    
     eval_step = dev_args.eval_interval // train_args.batch_size
     gstep = initial_step // train_args.batch_size
 
@@ -156,7 +120,8 @@ def train(args, tokenizer, model, initial_step=0):
                 model.train()
                 logger.info(f"Epoch: {epoch} | Batch: {gstep} | Dev loss: {loss_dev:.8f} | Time: {t:.3f}")
                 writer.add_scalar('Loss/dev', loss_dev, global_step=gstep * train_args.batch_size)
-                save_checkpoint(train_dev_args, tokenizer, model, gstep * train_args.batch_size)
+                save_checkpoint(train_dev_args, tokenizer, model, gstep * train_args.batch_size,
+                                optimizer, scheduler)
 
         loss_disp /= (local_step + 1)
         logger.info(
@@ -265,12 +230,56 @@ def main(
         r = re.compile(r" <.+> ")
         args.train.special_tokens = list(map(str.strip, filter(r.match, separators.values())))
     initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
-    if ckpt_path:
-        args.train.checkpoint = str(ckpt_path)
-        config, tokenizer, model = load_checkpoint(args.train, device=DEVICE)
+
+    config, tokenizer, model = set_model(args.train)
+    train_dataloader = get_dataloader(
+        args.train,
+        tokenizer,
+        args.train.dst_train_path,
+        sampler=RandomSampler,
+        data_size=args.train.data_size
+    )
+    dev_dataloader = get_dataloader(
+        args.dev,
+        tokenizer,
+        args.dev.dst_dev_path,
+        sampler=SequentialSampler,
+        data_size=args.dev.data_size
+    )
+    
+    if 'gpt2' in args.train.model_name_or_path.lower():
+        optimizer = AdamW(
+            model.parameters(),
+            lr=args.train.learning_rate,
+            eps=args.train.adam_eps
+        )
+    elif 't5' in args.train.model_name_or_path.lower():
+        optimizer = Adafactor(
+            model.parameters(),
+            lr=args.train.learning_rate,
+            scale_parameter=False,
+            relative_step=False,
+            warmup_init=False
+        )
     else:
-        config, tokenizer, model = set_model(args.train)
-    train(args, tokenizer, model, initial_step=initial_step)
+        raise ValueError("Unsupported model.")
+    scheduler = None
+    if args.train.use_scheduler:
+        t_total = len(train_dataloader) // args.train.gradient_accumulation_steps * args.train.epochs
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=args.train.warmup_steps,
+            num_training_steps=t_total
+        )
+    
+    if ckpt_path:
+        # Load from checkpoint
+        args.train.checkpoint = str(ckpt_path)
+        config, tokenizer, model, optimizer, scheduler = load_checkpoint(
+            args.train, optimizer, scheduler, device=DEVICE)
+
+    train(args, tokenizer, model, train_dataloader, dev_dataloader,
+          optimizer, scheduler, initial_step=initial_step)
 
 
 if __name__ == '__main__':

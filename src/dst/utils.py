@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 import re
 from pathlib import Path
@@ -23,7 +24,7 @@ def set_seed(args):
     torch.backends.cudnn.benchmark = args.cudnn.benchmark
 
 
-def save_checkpoint(args, tokenizer, model, step):
+def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     ckpt_path = Path(args.train.checkpoint_dir)
     ckpt_path = ckpt_path.joinpath(args.train.experiment_name)
     if not ckpt_path.exists():
@@ -33,9 +34,13 @@ def save_checkpoint(args, tokenizer, model, step):
     tokenizer.save_pretrained(save_path)
     model.save_pretrained(save_path)
     OmegaConf.save(args, f"{ckpt_path}/model_config.yaml")
+    torch.save({
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict()
+    }, os.path.join(save_path, "checkpoint.pth"))
 
 
-def load_checkpoint(args, device: torch.device):
+def load_checkpoint(args, optimizer, scheduler, device: torch.device):
     ckpt_path = args.checkpoint
     logger.info(f"Load model, tokenizer from {ckpt_path}")
     if 'gpt2' in args.model_name_or_path.lower():
@@ -47,7 +52,15 @@ def load_checkpoint(args, device: torch.device):
     else:
         raise ValueError("Unsupported model.")
     model.to(device)
-    return model.config, tokenizer, model
+
+    if optimizer is None and scheduler is None:
+        return model.config, tokenizer, model
+    else:
+        checkpoint = torch.load(os.path.join(ckpt_path, "checkpoint.pth"))
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if scheduler is not None:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        return model.config, tokenizer, model, optimizer, scheduler
 
 
 def humanise(

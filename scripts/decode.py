@@ -200,7 +200,7 @@ def decode_checkpoint(
     else:
         this_ckpt_hyp_path.mkdir(parents=True, exist_ok=True)
     logger.info(f"Decoding {str(ckpt_path)}. Saving dialogues and belief states to {hyp_path}")
-    _, tokenizer, model = load_checkpoint(args, device=DEVICE)
+    _, tokenizer, model = load_checkpoint(args, None, None, device=DEVICE)
     belief_states = test(args, tokenizer, model)
     with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
         json.dump(belief_states, f, indent=4)
