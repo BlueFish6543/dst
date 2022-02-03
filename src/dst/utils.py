@@ -40,7 +40,7 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     }, os.path.join(save_path, "checkpoint.pth"))
 
 
-def load_checkpoint(args, optimizer, scheduler, device: torch.device):
+def load_model(args, device: torch.device):
     ckpt_path = args.checkpoint
     logger.info(f"Load model, tokenizer from {ckpt_path}")
     if 'gpt2' in args.model_name_or_path.lower():
@@ -52,15 +52,15 @@ def load_checkpoint(args, optimizer, scheduler, device: torch.device):
     else:
         raise ValueError("Unsupported model.")
     model.to(device)
+    return model.config, tokenizer, model
 
-    if optimizer is None and scheduler is None:
-        return model.config, tokenizer, model
-    else:
-        checkpoint = torch.load(os.path.join(ckpt_path, "checkpoint.pth"))
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if scheduler is not None:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        return model.config, tokenizer, model, optimizer, scheduler
+
+def load_checkpoint(ckpt_path, optimizer, scheduler):
+    checkpoint = torch.load(os.path.join(ckpt_path, "checkpoint.pth"))
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if scheduler is not None:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    return optimizer, scheduler
 
 
 def humanise(

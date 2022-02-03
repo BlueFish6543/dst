@@ -32,7 +32,7 @@ from src.dst.dataset import (
     TrainDataset,
     Vocabulary
 )
-from src.dst.utils import set_seed, save_checkpoint, load_checkpoint
+from src.dst.utils import set_seed, save_checkpoint, load_model, load_checkpoint
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -231,7 +231,13 @@ def main(
         args.train.special_tokens = list(map(str.strip, filter(r.match, separators.values())))
     initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
 
-    config, tokenizer, model = set_model(args.train)
+    if ckpt_path:
+        # Load from checkpoint
+        args.train.checkpoint = str(ckpt_path)
+        config, tokenizer, model, = load_model(args.train, device=DEVICE)
+    else:
+        config, tokenizer, model = set_model(args.train)
+
     train_dataloader = get_dataloader(
         args.train,
         tokenizer,
@@ -271,12 +277,8 @@ def main(
             num_warmup_steps=args.train.warmup_steps,
             num_training_steps=t_total
         )
-    
     if ckpt_path:
-        # Load from checkpoint
-        args.train.checkpoint = str(ckpt_path)
-        config, tokenizer, model, optimizer, scheduler = load_checkpoint(
-            args.train, optimizer, scheduler, device=DEVICE)
+        optimizer, scheduler = load_checkpoint(ckpt_path, optimizer, scheduler)
 
     train(args, tokenizer, model, train_dataloader, dev_dataloader,
           optimizer, scheduler, initial_step=initial_step)

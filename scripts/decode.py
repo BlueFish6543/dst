@@ -18,7 +18,7 @@ from tqdm import tqdm
 from src.dst.dataset import (
     TestDataset
 )
-from src.dst.utils import load_checkpoint, set_seed
+from src.dst.utils import load_model, set_seed
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -200,7 +200,7 @@ def decode_checkpoint(
     else:
         this_ckpt_hyp_path.mkdir(parents=True, exist_ok=True)
     logger.info(f"Decoding {str(ckpt_path)}. Saving dialogues and belief states to {hyp_path}")
-    _, tokenizer, model = load_checkpoint(args, None, None, device=DEVICE)
+    _, tokenizer, model = load_model(args, device=DEVICE)
     belief_states = test(args, tokenizer, model)
     with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
         json.dump(belief_states, f, indent=4)
