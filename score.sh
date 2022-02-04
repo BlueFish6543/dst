@@ -62,16 +62,17 @@ conda activate /home/zxc22/.conda/envs/dst
 which python
 
 #STEPARRAY=(80000 160000 240000 320000 400000 480000 560000 640000 720000 800000)
-STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
+#STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
+STEPARRAY=(1760000 1920000 2080000 2240000 2400000 2560000 2720000 2880000 3040000 3200000)
 STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
 
 #! Full path to application executable:
 application="python -u -m scripts.score"
 
 #! Run options for the application:
-options="--prediction_dir decode/experiment-4/model.${STEP} \
+options="--prediction_dir decode/experiment-5-2/model.${STEP} \
 --raw_data_dir data/raw/sgd/ --eval_set test \
---output_metric_file decode/experiment-4/model.${STEP}/metrics.json"
+--output_metric_file decode/experiment-5-2/model.${STEP}/metrics.json"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

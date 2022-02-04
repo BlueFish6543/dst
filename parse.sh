@@ -64,7 +64,7 @@ which python
 application="python -u -m scripts.parse"
 
 #! Run options for the application:
-options="-d decode/experiment-4 -s data/raw/sgd/test/schema.json -t data/interim/sgd/test"
+options="-d decode/experiment-5-2 -s data/raw/sgd/test/schema.json -t data/interim/sgd/test"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

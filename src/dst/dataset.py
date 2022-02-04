@@ -107,7 +107,10 @@ class TrainDataset(DSTDataset):
                         for slot in turn['slot_dict'][service]:
                             description = turn['slot_dict'][service][slot]["description"]
                             value = turn['slot_dict'][service][slot]["value"]
-                            context_ids = self.tokenizer(description + " " + context)['input_ids']
+                            cat_values = turn['slot_dict'][service][slot]["cat"]
+                            # <SLT> slot : description <USR> ... <SYS> ... <USR> ... [<VAL> ... <SEP> ...]
+                            model_input = description + " " + context + " " + cat_values
+                            context_ids = self.tokenizer(model_input.strip())['input_ids']
                             target_ids = self.tokenizer(value)['input_ids']
                             over_length = self.create_ids(
                                 dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
@@ -212,7 +215,10 @@ class TestDataset(DSTDataset):
                     for service in turn['slot_dict']:
                         for slot in turn['slot_dict'][service]:
                             description = turn['slot_dict'][service][slot]["description"]
-                            context_ids = self.tokenizer(description + " " + context)['input_ids']
+                            cat_values = turn['slot_dict'][service][slot]["cat"]
+                            # <SLT> slot : description <USR> ... <SYS> ... <USR> ... [<VAL> ... <SEP> ...]
+                            model_input = description + " " + context + " " + cat_values
+                            context_ids = self.tokenizer(model_input.strip())['input_ids']
                             over_length = self.create_ids(
                                 dialogue_id, turn_index, context_ids, user_utterance, over_length,
                                 service=service, slot=slot)

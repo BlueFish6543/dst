@@ -115,18 +115,19 @@ def get_slots(
             service_description = service["description"]
             result[service_name] = {}
             for slot in service["slots"]:
-                # <SVC> service : description <SLT> slot : description
+                # <SLT> slot : description
                 slot_name = humanise(slot["name"])
-                description = SEPARATORS["service"] + service_name + \
-                    SEPARATORS["description"] + service_description + \
-                    SEPARATORS["slot"] + slot_name + \
+                description = SEPARATORS["slot"] + slot_name + \
                     SEPARATORS["description"] + slot["description"]
                 if slot["is_categorical"]:
-                    # <SVC> service: description <SLT> slot : description <VAL> val1 <SEP> val2
-                    description += SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
+                    # <VAL> val1 <SEP> val2
+                    cat_values = SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
+                else:
+                    cat_values = ""
                 result[service_name][slot_name] = {
                     "description": description.strip(),
-                    "value": ""
+                    "value": "",
+                    "cat": cat_values.strip()
                 }
             services.pop(0)
             if not services:
@@ -196,25 +197,25 @@ def main():
                 data = json.load(f)
             result.update(process_file(schema, data))
 
-    total_slots = 0
-    empty_slots = 0
-    for dialogue in result:
-        for turn in result[dialogue]:
-            for service in turn["slot_dict"]:
-                for slot in turn["slot_dict"][service]:
-                    total_slots += 1
-                    if not turn["slot_dict"][service][slot]["value"]:
-                        empty_slots += 1
-    print("Total slots: {}".format(total_slots))
-    print("Empty slots: {}".format(empty_slots))
-    print("Proportion of empty slots: {}".format(empty_slots / total_slots))
+    # total_slots = 0
+    # empty_slots = 0
+    # for dialogue in result:
+    #     for turn in result[dialogue]:
+    #         for service in turn["slot_dict"]:
+    #             for slot in turn["slot_dict"][service]:
+    #                 total_slots += 1
+    #                 if not turn["slot_dict"][service][slot]["value"]:
+    #                     empty_slots += 1
+    # print("Total slots: {}".format(total_slots))
+    # print("Empty slots: {}".format(empty_slots))
+    # print("Proportion of empty slots: {}".format(empty_slots / total_slots))
 
-    # out = {
-    #     "data": result,
-    #     "separators": SEPARATORS
-    # }
-    # with open(args.out, "w") as f:
-    #     json.dump(out, f, indent=4, sort_keys=True)
+    out = {
+        "data": result,
+        "separators": SEPARATORS
+    }
+    with open(args.out, "w") as f:
+        json.dump(out, f, indent=4, sort_keys=True)
 
 
 if __name__ == '__main__':
