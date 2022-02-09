@@ -5,7 +5,7 @@ data:
 train:
   model_name_or_path: 'gpt2'
   max_seq_len: 1024 # maximum sequence length
-  epochs: 5 # maximum number of epochs
+  epochs: 2 # maximum number of epochs
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
   batch_size: 4
   gradient_accumulation_steps: 4 # gradients applied every this many batches to the output
@@ -19,7 +19,7 @@ train:
   # Path where checkpoints are *saved*
   checkpoint_dir: 'models'
   # If populated, the checkpoints are saved under checkpoint_dir/experiment_name
-  experiment_name: 'experiment-7'
+  experiment_name: 'experiment-10'
   # Populate if the training is restarted from checkpoint
   checkpoint: ''
   verbose:

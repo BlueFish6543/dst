@@ -11,10 +11,10 @@ SEPARATORS = {
     "service": " <SVC> ",
     "description": " : ",
     "default": " <SEP> ",
-    "slot-value": " = ",
+    "pair": " = ",
+    "intent": " <INT> ",
     "slot": " <SLT> ",
-    "values": " <VAL> ",
-    "categorical": "<CAT>"
+    "values": " <VAL> "
 }
 
 
@@ -32,9 +32,7 @@ def value_in_utterance(
 
 def process_frame(
         frame: dict,
-        active_intent_list: list,
-        requested_slots_list: list,
-        slot_values_list: list,
+        intent_dict: dict,
         previous_slots: dict,
         slot_dict: dict,
         system_utterance: str,
@@ -43,15 +41,13 @@ def process_frame(
     service = humanise(frame["service"])
     state = frame["state"]
 
-    # <SVC> service <SEP> intent
-    active_intent = SEPARATORS["service"] + service + SEPARATORS["default"] + humanise(state["active_intent"])
-    active_intent_list.append(active_intent.strip())
+    # Update active intent
+    if state["active_intent"] != "NONE":
+        intent_dict[service]["active"] = humanise(state["active_intent"])
 
-    # <SVC> service <SEP> slot1 <SEP> slot2
-    if state["requested_slots"]:
-        requested_slots = SEPARATORS["default"].join(sorted(map(humanise, state["requested_slots"])))
-        requested_slots = SEPARATORS["service"] + service + SEPARATORS["default"] + requested_slots
-        requested_slots_list.append(requested_slots.strip())
+    # Update requested slots
+    for slot in state["requested_slots"]:
+        slot_dict[service][humanise(slot)]["requested"] = True
 
     if not state["slot_values"]:
         # We are done
@@ -77,31 +73,34 @@ def process_frame(
     for slot, value in current_slots.items():
         slot_dict[service][slot]["value"] = value
 
-    # <SVC> service <SEP> slot1 = value1 <SEP> slot2 = value2
-    current_slots = map(
-        lambda item: item[0] + SEPARATORS["slot-value"] + item[1],
-        current_slots.items()
-    )
-    current_slots = SEPARATORS["default"].join(sorted(current_slots))
-    slot_values = SEPARATORS["service"] + service + SEPARATORS["default"] + current_slots
-    slot_values_list.append(slot_values.strip())
 
-
-def get_slot_names(
+def get_intents(
         schema: List[dict],
         turn: dict
-) -> str:
-    services = [frame["service"] for frame in turn["frames"]]
-    result = ""
+) -> dict:
+    services = list(sorted([frame["service"] for frame in turn["frames"]]))
+    result = {}
     for service in schema:
         if service["service_name"] == services[0]:
-            slot_names = list(sorted([humanise(slot["name"]) for slot in service["slots"]]))
-            result += SEPARATORS["service"] + humanise(service["service_name"]) + \
-                SEPARATORS["default"] + SEPARATORS["default"].join(slot_names)
+            service_name = humanise(service["service_name"])
+            service_description = service["description"]
+
+            description = (SEPARATORS["service"] + service_name +
+                           SEPARATORS["description"] + service_description).strip()
+            for intent in service["intents"]:
+                # <SVC> service : description <INT> intent : description <INT> ...
+                intent_name = humanise(intent["name"])
+                description += SEPARATORS["intent"] + intent_name + \
+                    SEPARATORS["description"] + intent["description"]
+
+            result[service_name] = {
+                "description": description.strip(),
+                "active": ""
+            }
             services.pop(0)
             if not services:
                 break
-    return result.strip()
+    return result
 
 
 def get_slots(
@@ -125,9 +124,9 @@ def get_slots(
                 if slot["is_categorical"]:
                     # <CAT> <SVC> service: description <SLT> slot : description <VAL> value <SEP> value
                     description += SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
-                    description = SEPARATORS["categorical"] + description
                 result[service_name][slot_name] = {
                     "description": description.strip(),
+                    "requested": False,
                     "value": ""
                 }
             services.pop(0)
@@ -153,26 +152,18 @@ def process_file(
                 # We don't need to do anything else
 
             elif turn["speaker"] == "USER":
-                slot_names = get_slot_names(schema, turn)
+                intent_dict = get_intents(schema, turn)
                 slot_dict = get_slots(schema, turn)
                 user_utterance = turn["utterance"]
-                # These lists accumulate across frames
-                active_intent_list = []
-                requested_slots_list = []
-                slot_values_list = []
                 for frame in turn["frames"]:
                     # Each frame represents one service (?)
-                    process_frame(frame,
-                                  active_intent_list, requested_slots_list, slot_values_list,
-                                  previous_slots, slot_dict, system_utterance, user_utterance)
+                    process_frame(frame, intent_dict, previous_slots,
+                                  slot_dict, system_utterance, user_utterance)
 
                 res = {
                     "system_utterance": system_utterance,
                     "user_utterance": user_utterance,
-                    "active_intent": " ".join(sorted(active_intent_list)),
-                    "requested_slots": " ".join(sorted(requested_slots_list)),
-                    "slot_values": " ".join(sorted(slot_values_list)),
-                    "slot_names": slot_names,
+                    "intent_dict": intent_dict,
                     "slot_dict": slot_dict
                 }
                 result[dialogue_id].append(res)
@@ -197,19 +188,6 @@ def main():
             with open(os.path.join(args.dir, file), "r") as f:
                 data = json.load(f)
             result.update(process_file(schema, data))
-
-    # total_slots = 0
-    # empty_slots = 0
-    # for dialogue in result:
-    #     for turn in result[dialogue]:
-    #         for service in turn["slot_dict"]:
-    #             for slot in turn["slot_dict"][service]:
-    #                 total_slots += 1
-    #                 if not turn["slot_dict"][service][slot]["value"]:
-    #                     empty_slots += 1
-    # print("Total slots: {}".format(total_slots))
-    # print("Empty slots: {}".format(empty_slots))
-    # print("Proportion of empty slots: {}".format(empty_slots / total_slots))
 
     out = {
         "data": result,

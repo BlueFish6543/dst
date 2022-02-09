@@ -49,6 +49,7 @@ class DSTDataset(torch.utils.data.Dataset):
         with open(filename, 'r') as f:
             dataset = json.load(f)
             self.data = dataset["data"]
+            self.separators = dataset["separators"]
         self._create_examples()
 
     @staticmethod
@@ -76,14 +77,14 @@ class DSTDataset(torch.utils.data.Dataset):
 
 
 class TrainDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False, per_slot=False):
-        self.add_slot_names = add_slot_names
-        self.per_slot = per_slot
+    def __init__(self, args, tokenizer, filename, data_size):
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
         self.examples = []
         over_length = 0
+        skip_counter = 0
+        intent_examples = 0
         for dialogue_id, dialogue in tqdm(
                 self.data.items(),
                 desc=f"Loading {self.filename}\n",
@@ -95,43 +96,52 @@ class TrainDataset(DSTDataset):
             for turn_index, turn in enumerate(dialogue):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
-
-                if self.per_slot:
-                    # Iterate per slot
-                    if not system_utterance:
-                        utterance = f"<USR> {user_utterance} "
-                    else:
-                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                    context += utterance
-                    for service in turn['slot_dict']:
-                        for slot in turn['slot_dict'][service]:
-                            description = turn['slot_dict'][service][slot]["description"]
-                            value = turn['slot_dict'][service][slot]["value"]
-                            cat_values = turn['slot_dict'][service][slot]["cat"]
-                            # <SLT> slot : description <USR> ... <SYS> ... <USR> ... [<VAL> ... <SEP> ...]
-                            model_input = description + " " + context + " " + cat_values
-                            context_ids = self.tokenizer(model_input.strip())['input_ids']
-                            target_ids = self.tokenizer(value)['input_ids']
-                            over_length = self.create_ids(
-                                dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
-
+                if not system_utterance:
+                    utterance = f"<USR> {user_utterance} "
                 else:
-                    # Everything in one string
-                    slot_values = turn['slot_values']
-                    if not system_utterance:
-                        if self.add_slot_names:
-                            utterance = slot_values + f" <USR> {user_utterance} "
-                        else:
-                            utterance = f"<USR> {user_utterance} "
-                    else:
-                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                    context += utterance
-                    context_ids = self.tokenizer(context)['input_ids']
-                    target_ids = self.tokenizer(slot_values)['input_ids']
+                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                context += utterance
+
+                # Intent
+                for service in turn['intent_dict']:
+                    description = turn['intent_dict'][service]["description"]
+                    active = turn['intent_dict'][service]["active"]
+                    # <SVC> service: description <INT> intent : description <INT> ...
+                    # <USR> ... <SYS> ... <USR> ...
+                    model_input = description + " " + context
+                    print(model_input)
+                    context_ids = self.tokenizer(model_input.strip())['input_ids']
+                    target_ids = self.tokenizer(active)['input_ids']
                     over_length = self.create_ids(
                         dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
+                    intent_examples += 1
+
+                # Iterate per slot
+                for service in turn['slot_dict']:
+                    for slot in turn['slot_dict'][service]:
+                        description = turn['slot_dict'][service][slot]["description"]
+                        requested = str(turn['slot_dict'][service][slot]["requested"]).lower()
+                        value = turn['slot_dict'][service][slot]["value"]
+                        if requested == 'false' and not value:
+                            skip_counter += 1
+                            if not (skip_counter % 2):
+                                # Skip some examples to balance out intent and slot prediction tasks a bit
+                                continue
+                        target = "requested" + self.separators["pair"] + requested + \
+                            self.separators["default"] + "value" + self.separators["pair"] + value
+                        print(target)
+
+                        # <SVC> service : description <SLT> slot : description [<VAL> ... <SEP> ...]
+                        # <USR> ... <SYS> ... <USR> ...
+                        # requested = true/false <SEP> value = value
+                        model_input = description + " " + context
+                        context_ids = self.tokenizer(model_input.strip())['input_ids']
+                        target_ids = self.tokenizer(target.strip())['input_ids']
+                        over_length = self.create_ids(
+                            dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
 
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
+        logger.info(f"Data statistics: {self.filename}: {intent_examples} intent examples")
         logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
 
     def create_ids(self, dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length):
@@ -182,10 +192,8 @@ class TrainDataset(DSTDataset):
 
 
 class TestDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size, add_slot_names=False, per_slot=False):
+    def __init__(self, args, tokenizer, filename, data_size):
         self.to_decode: set[str] = set(args.decode_only)
-        self.add_slot_names = add_slot_names
-        self.per_slot = per_slot
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
@@ -204,38 +212,33 @@ class TestDataset(DSTDataset):
             for turn_index, turn in enumerate(dialogue):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
-
-                if self.per_slot:
-                    # Iterate per slot
-                    if not system_utterance:
-                        utterance = f"<USR> {user_utterance} "
-                    else:
-                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                    context += utterance
-                    for service in turn['slot_dict']:
-                        for slot in turn['slot_dict'][service]:
-                            description = turn['slot_dict'][service][slot]["description"]
-                            cat_values = turn['slot_dict'][service][slot]["cat"]
-                            # <SLT> slot : description <USR> ... <SYS> ... <USR> ... [<VAL> ... <SEP> ...]
-                            model_input = description + " " + context + " " + cat_values
-                            context_ids = self.tokenizer(model_input.strip())['input_ids']
-                            over_length = self.create_ids(
-                                dialogue_id, turn_index, context_ids, user_utterance, over_length,
-                                service=service, slot=slot)
-
+                if not system_utterance:
+                    utterance = f"<USR> {user_utterance} "
                 else:
-                    # Everything in one string
-                    slot_values = turn['slot_values']
-                    if not system_utterance:
-                        if self.add_slot_names:
-                            utterance = slot_values + f" <USR> {user_utterance} "
-                        else:
-                            utterance = f"<USR> {user_utterance} "
-                    else:
-                        utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
-                    context += utterance
-                    context_ids = self.tokenizer(context)['input_ids']
-                    over_length = self.create_ids(dialogue_id, turn_index, context_ids, user_utterance, over_length)
+                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                context += utterance
+
+                # Intent
+                for service in turn['intent_dict']:
+                    description = turn['intent_dict'][service]["description"]
+                    # <SVC> service: description <INT> intent : description <INT> ...
+                    # <USR> ... <SYS> ... <USR> ...
+                    model_input = description + " " + context
+                    context_ids = self.tokenizer(model_input.strip())['input_ids']
+                    over_length = self.create_ids(
+                        dialogue_id, turn_index, context_ids, user_utterance, over_length, service=service)
+
+                # Iterate per slot
+                for service in turn['slot_dict']:
+                    for slot in turn['slot_dict'][service]:
+                        description = turn['slot_dict'][service][slot]["description"]
+                        # <SVC> service : description <SLT> slot : description [<VAL> ... <SEP> ...]
+                        # <USR> ... <SYS> ... <USR> ...
+                        model_input = description + " " + context
+                        context_ids = self.tokenizer(model_input.strip())['input_ids']
+                        over_length = self.create_ids(
+                            dialogue_id, turn_index, context_ids, user_utterance, over_length,
+                            service=service, slot=slot)
 
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
         logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import operator
 import pathlib
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Union, Optional
+from typing import Optional
 
 import click
 import torch
@@ -136,7 +135,7 @@ def decode(args, batch, model, tokenizer):
 
 
 def test(args, tokenizer, model):
-    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size, per_slot=True)
+    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size)
     sampler = SequentialSampler(dataset)
     test_gen_dataloader = DataLoader(
         dataset,
@@ -154,13 +153,12 @@ def test(args, tokenizer, model):
             usr_utterance = batch['user_utterance'][0]
             service = batch['service'][0]
             slot = batch['slot'][0]
-            if service is None or slot is None:
+            if slot is None:
                 collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
-                collector[dialogue_id][turn_idx]["bs_pred_str"] = bs_pred_str
+                collector[dialogue_id][turn_idx][service]["*intent*"] = bs_pred_str
             else:
                 collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
                 collector[dialogue_id][turn_idx][service][slot] = bs_pred_str
-
     return dict(collector)
 
 
