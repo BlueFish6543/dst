@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import torch
-
 from dataclasses import dataclass, field
 from typing import Union
+
+import torch
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)

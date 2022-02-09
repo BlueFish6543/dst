@@ -1,13 +1,11 @@
 import json
 import logging
-import operator
 import os
 import re
 import sys
 from argparse import ArgumentParser
-from collections import defaultdict
 from distutils.dir_util import copy_tree
-from typing import Optional
+from typing import Tuple
 
 from omegaconf import OmegaConf
 
@@ -16,53 +14,49 @@ from src.dst.utils import humanise
 logger = logging.getLogger(__name__)
 
 
-def build_predicted_state(
+def extract_intent(
+        schema: dict,
         predicted_str: str,
-        i: int,
+        frame: dict
+):
+    for intent in schema["intents"]:
+        if humanise(schema["intents"][intent]["name"]) == predicted_str:
+            frame["state"]["active_intent"] = schema["intents"][intent]["name"]
+            return
+    # Default to "NONE"
+    frame["state"]["active_intent"] = "NONE"
+
+
+def parse_predicted_slot_string(
         dialogue_id: str,
+        i: str,
+        predicted_str: str,
         separators: dict
-) -> dict:
-    predicted_state = defaultdict(dict)
-    split_by_services = predicted_str.split(separators["service"].strip())
-    for split in split_by_services:
-        if not split:
-            continue  # empty string
-        split_by_default_separator = split.split(separators["default"].strip())
-        if len(split_by_default_separator) < 2:
-            logger.warning(f"Could not split string {split} in {dialogue_id}_{i}. Skipping.")
-            continue
-        service = split_by_default_separator[0].strip()
-        for slot_value_pair in split_by_default_separator[1:]:
-            split_slot_value = slot_value_pair.split(separators["slot-value"].strip())
-            if len(split_slot_value) != 2:
-                logger.warning(f"Could not split string {slot_value_pair} in {dialogue_id}_{i}. Skipping.")
-                continue
-            predicted_state[service][split_slot_value[0].strip()] = split_slot_value[1].strip()  # slot: value
-    return predicted_state
+) -> Tuple[bool, str]:
+    # Expect "requested = true/false <SEP> value = value"
+    pair = separators["pair"]
+    default = separators["default"]
+    match = re.search(r"requested.*{}(.*){}.*value.*{}(.*)".format(
+        pair, default, pair
+    ), predicted_str)
+
+    if match is None:
+        # String was not in expected format
+        logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
+        # Default to False for requested slots
+        return False, ""
+
+    requested = match.group(1).strip().lower() == "true"
+    return requested, match.group(2).strip()
 
 
-def extract_best_match_service(
-        predicted_state: dict,
-        service_schema: dict
-) -> Optional[str]:
-    matches = {
-        predicted_service: len(
-            set(map(humanise, [slot["name"] for slot in service_schema["slots"]])).intersection(
-                set(predicted_state[predicted_service].keys())
-            )) for predicted_service in predicted_state.keys()
-    }
-    best_match_service_list = [key for key, value in sorted(matches.items(), key=operator.itemgetter(1))]
-    if not best_match_service_list:
-        return None
-    return best_match_service_list[-1]
-
-
-def populate_slot_values(
+def populate_slots(
         predicted_data: dict,
         template_dialogue: dict,
         dialogue_id: str,
         schema: dict,
-        model_name: str
+        model_name: str,
+        separators: dict
 ):
     for i in predicted_data:
         # Loop over turns
@@ -80,6 +74,7 @@ def populate_slot_values(
                     break
             assert service_schema is not None
             humanised_service_name = humanise(service)
+            service_schema["slots"].append({"name": "*intent*"})  # for active intent prediction
 
             for slot_name in [slot["name"] for slot in service_schema["slots"]]:
                 # Loop over slots
@@ -105,9 +100,18 @@ def populate_slot_values(
                     predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
                 else:
                     raise ValueError("Unsupported model.")
-                # Add to frame if not empty string
-                if predicted_str:
-                    frame["state"]["slot_values"][slot_name] = [predicted_str]
+
+                if humanised_slot_name == "*intent*":
+                    # Active intent prediction
+                    extract_intent(service_schema, predicted_str, frame)
+                else:
+                    # Requested slots and slot values prediction
+                    requested, value = parse_predicted_slot_string(dialogue_id, i, predicted_str, separators)
+                    if requested:
+                        frame["state"]["requested_slots"].append(slot_name)
+                    if value:
+                        # Add to frame if not empty string
+                        frame["state"]["slot_values"][slot_name] = [value]
 
 
 def parse(
@@ -115,12 +119,11 @@ def parse(
         predictions: dict,
         root: str,
 ):
-    # Load separators
     with open(os.path.join(root, "experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
         model_name = config.decode.model_name_or_path
-    # with open(os.path.join(os.getcwd(), config.decode.dst_test_path), "r") as f:
-    #     separators = json.load(f)["separators"]
+    with open(os.path.join(os.getcwd(), config.decode.dst_test_path), "r") as f:
+        separators = json.load(f)["separators"]
 
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in os.listdir(root):
@@ -135,7 +138,7 @@ def parse(
                     except KeyError:
                         logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
                         continue
-                    populate_slot_values(data, dialogue, dialogue_id, schema, model_name)
+                    populate_slots(data, dialogue, dialogue_id, schema, model_name, separators)
             with open(os.path.join(root, file), "w") as f:
                 json.dump(dialogues, f, indent=4)
 
