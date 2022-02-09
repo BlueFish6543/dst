@@ -13,7 +13,8 @@ SEPARATORS = {
     "default": " <SEP> ",
     "slot-value": " = ",
     "slot": " <SLT> ",
-    "values": " <VAL> "
+    "values": " <VAL> ",
+    "categorical": "<CAT>"
 }
 
 
@@ -115,19 +116,19 @@ def get_slots(
             service_description = service["description"]
             result[service_name] = {}
             for slot in service["slots"]:
-                # <SLT> slot : description
+                # <SVC> service : description <SLT> slot : description
                 slot_name = humanise(slot["name"])
-                description = SEPARATORS["slot"] + slot_name + \
+                description = SEPARATORS["service"] + service_name + \
+                    SEPARATORS["description"] + service_description + \
+                    SEPARATORS["slot"] + slot_name + \
                     SEPARATORS["description"] + slot["description"]
                 if slot["is_categorical"]:
-                    # <VAL> val1 <SEP> val2
-                    cat_values = SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
-                else:
-                    cat_values = ""
+                    # <CAT> <SVC> service: description <SLT> slot : description <VAL> value <SEP> value
+                    description += SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
+                    description = SEPARATORS["categorical"] + description
                 result[service_name][slot_name] = {
                     "description": description.strip(),
-                    "value": "",
-                    "cat": cat_values.strip()
+                    "value": ""
                 }
             services.pop(0)
             if not services:
