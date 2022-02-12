@@ -68,9 +68,9 @@ STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
 application="python -u -m scripts.decode"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd/experiment-9/test.json \
+options="-t data/preprocessed/sgd/experiment-10/test.json \
 -a configs/decode_arguments.yaml \
--c models/experiment-9/model.${STEP} -hyp decode/ -vv"
+-c models/experiment-10/model.${STEP} -hyp decode/ -vv"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

@@ -24,6 +24,7 @@
 #SBATCH --time=03:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
+#SBATCH --array=0-9
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -60,11 +61,14 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
+STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
+STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
+
 #! Full path to application executable:
 application="python -u -m scripts.parse"
 
 #! Run options for the application:
-options="-d decode/experiment-9 -s data/raw/sgd/test/schema.json -t data/interim/sgd/test"
+options="-d decode/experiment-10/model.${STEP} -s data/raw/sgd/test/schema.json -t data/interim/sgd/test"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

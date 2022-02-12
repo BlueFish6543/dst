@@ -109,7 +109,6 @@ class TrainDataset(DSTDataset):
                     # <SVC> service: description <INT> intent : description <INT> ...
                     # <USR> ... <SYS> ... <USR> ...
                     model_input = description + " " + context
-                    print(model_input)
                     context_ids = self.tokenizer(model_input.strip())['input_ids']
                     target_ids = self.tokenizer(active)['input_ids']
                     over_length = self.create_ids(
@@ -129,7 +128,6 @@ class TrainDataset(DSTDataset):
                                 continue
                         target = "requested" + self.separators["pair"] + requested + \
                             self.separators["default"] + "value" + self.separators["pair"] + value
-                        print(target)
 
                         # <SVC> service : description <SLT> slot : description [<VAL> ... <SEP> ...]
                         # <USR> ... <SYS> ... <USR> ...

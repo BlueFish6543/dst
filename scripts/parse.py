@@ -20,8 +20,8 @@ def extract_intent(
         frame: dict
 ):
     for intent in schema["intents"]:
-        if humanise(schema["intents"][intent]["name"]) == predicted_str:
-            frame["state"]["active_intent"] = schema["intents"][intent]["name"]
+        if humanise(intent["name"]) == predicted_str:
+            frame["state"]["active_intent"] = intent["name"]
             return
     # Default to "NONE"
     frame["state"]["active_intent"] = "NONE"
@@ -33,21 +33,34 @@ def parse_predicted_slot_string(
         predicted_str: str,
         separators: dict
 ) -> Tuple[bool, str]:
-    # Expect "requested = true/false <SEP> value = value"
-    pair = separators["pair"]
-    default = separators["default"]
-    match = re.search(r"requested.*{}(.*){}.*value.*{}(.*)".format(
-        pair, default, pair
-    ), predicted_str)
+    pair = separators["pair"].strip()
+    default = separators["default"].strip()
 
-    if match is None:
+    # Expect "requested = true/false <SEP> value = value"
+    output = predicted_str.split(default)
+    if len(output) != 2:
         # String was not in expected format
         logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
         # Default to False for requested slots
         return False, ""
 
-    requested = match.group(1).strip().lower() == "true"
-    return requested, match.group(2).strip()
+    requested = output[0].split(pair)
+    if len(requested) != 2 or requested[0].strip() != "requested":
+        # String was not in expected format
+        logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
+        # Default to False for requested slots
+        return False, ""
+    requested = requested[1].strip().lower() == "true"
+
+    value = output[1].split(pair)
+    if len(value) != 2 or value[0].strip() != "value":
+        # String was not in expected format
+        logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
+        # Default to False for requested slots
+        return False, ""
+    value = value[1].strip()
+
+    return requested, value
 
 
 def populate_slots(
