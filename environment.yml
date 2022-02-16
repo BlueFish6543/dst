@@ -5,6 +5,7 @@ channels:
   - huggingface
 dependencies:
   - pip
+  - keras
   - transformers
   - sentencepiece
   - tensorboard

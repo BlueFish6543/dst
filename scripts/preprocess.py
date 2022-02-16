@@ -122,8 +122,8 @@ def get_slots(
                     SEPARATORS["slot"] + slot_name + \
                     SEPARATORS["description"] + slot["description"]
                 if slot["is_categorical"]:
-                    # <CAT> <SVC> service: description <SLT> slot : description <VAL> value <SEP> value
-                    description += SEPARATORS["values"] + SEPARATORS["default"].join(slot["possible_values"])
+                    # <CAT> <SVC> service: description <SLT> slot : description <VAL> value <VAL> ...
+                    description += SEPARATORS["values"] + SEPARATORS["values"].join(slot["possible_values"])
                 result[service_name][slot_name] = {
                     "description": description.strip(),
                     "requested": False,
