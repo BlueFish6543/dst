@@ -10,7 +10,7 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J score
+#SBATCH -J preprocess
 #! Which project should be charged:
 #SBATCH -A BYRNE-SL3-CPU
 #SBATCH -p icelake
@@ -24,7 +24,6 @@
 #SBATCH --time=03:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
-#SBATCH --array=0-4
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -61,18 +60,9 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
-#STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
-#STEPARRAY=(1760000 1920000 2080000 2240000 2400000 2560000 2720000 2880000 3040000)
-STEPARRAY=("v1" "v2" "v3" "v4" "v5")
-STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
-
 #! Full path to application executable:
-application="python -u -m scripts.score"
 
 #! Run options for the application:
-options="--prediction_dir decode/sgd-x/${STEP}/experiment-11-1/model.2560000 \
---raw_data_dir data/raw/sgd-x/${STEP} --eval_set test \
---output_metric_file decode/sgd-x/${STEP}/experiment-11-1/model.2560000/metrics.json"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
@@ -103,7 +93,6 @@ export I_MPI_PIN_ORDER=scatter # Adjacent domains have minimal sharing of caches
 
 #! Choose this for a pure shared-memory OpenMP parallel program on a single node:
 #! (OMP_NUM_THREADS threads will be created):
-CMD="$application $options"
 
 #! Choose this for a MPI code (possibly using OpenMP) using OpenMPI:
 #CMD="mpirun -npernode $mpi_tasks_per_node -np $np $application $options"
@@ -133,6 +122,13 @@ fi
 
 echo -e "\nnumtasks=$numtasks, numnodes=$numnodes, mpi_tasks_per_node=$mpi_tasks_per_node (OMP_NUM_THREADS=$OMP_NUM_THREADS)"
 
-echo -e "\nExecuting command:\n==================\n$CMD\n"
+NAME="experiment-11"
+declare -a versions=("v1" "v2" "v3" "v4" "v5")
 
-eval $CMD
+for i in "${versions[@]}"
+do
+  mkdir -p data/preprocessed/sgd-x/"$i"/"$NAME"
+  python -m scripts.preprocess -d data/raw/sgd-x/"$i"/train -o data/preprocessed/sgd-x/"$i"/"$NAME"/train.json
+  python -m scripts.preprocess -d data/raw/sgd-x/"$i"/dev -o data/preprocessed/sgd-x/"$i"/"$NAME"/dev.json
+  python -m scripts.preprocess -d data/raw/sgd-x/"$i"/test -o data/preprocessed/sgd-x/"$i"/"$NAME"/test.json
+done
