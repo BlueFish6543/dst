@@ -1,20 +1,19 @@
 import argparse
 import json
 import os
+import random
 
 import re
 from typing import Optional, List
 
-from src.dst.utils import humanise
-
 SEPARATORS = {
-    "service": " <SVC> ",
-    "description": " : ",
+    # "service": " <SVC> ",
+    # "description": " : ",
     "default": " <SEP> ",
     "pair": " = ",
-    "intent": " <INT> ",
-    "slot": " <SLT> ",
-    "values": " <VAL> "
+    # "intent": " <INT> ",
+    # "slot": " <SLT> ",
+    # "values": " <VAL> "
 }
 
 
@@ -38,16 +37,16 @@ def process_frame(
         system_utterance: str,
         user_utterance: str
 ):
-    service = humanise(frame["service"])
+    service = frame["service"]
     state = frame["state"]
 
     # Update active intent
     if state["active_intent"] != "NONE":
-        intent_dict[service]["active"] = humanise(state["active_intent"])
+        intent_dict[service]["active"] = state["active_intent"]
 
     # Update requested slots
     for slot in state["requested_slots"]:
-        slot_dict[service][humanise(slot)]["requested"] = True
+        slot_dict[service][slot]["requested"] = True
 
     if not state["slot_values"]:
         # We are done
@@ -59,7 +58,6 @@ def process_frame(
     # in the list
     current_slots = {}
     for slot, values in state["slot_values"].items():
-        slot = humanise(slot)
         if service in previous_slots and slot in previous_slots[service] and \
                 previous_slots[service][slot] in values:
             current_slots[slot] = previous_slots[service][slot]
@@ -82,20 +80,21 @@ def get_intents(
     result = {}
     for service in schema:
         if service["service_name"] == services[0]:
-            service_name = humanise(service["service_name"])
+            service_name = service["service_name"]
             service_description = service["description"]
 
-            description = (SEPARATORS["service"] + service_name +
-                           SEPARATORS["description"] + service_description).strip()
-            for intent in service["intents"]:
-                # <SVC> service : description <INT> intent : description <INT> ...
-                intent_name = humanise(intent["name"])
-                description += SEPARATORS["intent"] + intent_name + \
-                    SEPARATORS["description"] + intent["description"]
+            description = "Intent: Service: " + service_description.strip()
+            random.shuffle(service["intents"])
+            mapping = {}
+            for index, intent in enumerate(service["intents"], 1):
+                # Intent: Service: description 1: description 2: description ...
+                description += " {}: ".format(index) + intent["description"].strip()
+                mapping[intent["name"]] = index
 
             result[service_name] = {
                 "description": description.strip(),
-                "active": ""
+                "active": "",
+                "mapping": mapping
             }
             services.pop(0)
             if not services:
@@ -111,23 +110,33 @@ def get_slots(
     result = {}
     for service in schema:
         if service["service_name"] == services[0]:
-            service_name = humanise(service["service_name"])
+            service_name = service["service_name"]
             service_description = service["description"]
             result[service_name] = {}
+
             for slot in service["slots"]:
-                # <SVC> service : description <SLT> slot : description
-                slot_name = humanise(slot["name"])
-                description = SEPARATORS["service"] + service_name + \
-                    SEPARATORS["description"] + service_description + \
-                    SEPARATORS["slot"] + slot_name + \
-                    SEPARATORS["description"] + slot["description"]
+                # Categorical/Non-categorical: Service: description Slot: description [1: value 2: value ...]
+                description = "Service: " + service_description.strip() + " Slot: " + slot["description"].strip()
+                mapping = {}
                 if slot["is_categorical"]:
-                    # <CAT> <SVC> service: description <SLT> slot : description <VAL> value <VAL> ...
-                    description += SEPARATORS["values"] + SEPARATORS["values"].join(slot["possible_values"])
-                result[service_name][slot_name] = {
+                    try:
+                        # We treat numerical categorical slots as non-categorical
+                        _ = [int(s) for s in slot["possible_values"]]
+                        description = "Non-categorical: " + description
+                    except ValueError:
+                        random.shuffle(slot["possible_values"])
+                        for index, value in enumerate(slot["possible_values"], 1):
+                            description += " {}: ".format(index) + value.strip()
+                            mapping[value] = index
+                        description = "Categorical: " + description
+                else:
+                    description = "Non-categorical: " + description
+
+                result[service_name][slot["name"]] = {
                     "description": description.strip(),
                     "requested": False,
-                    "value": ""
+                    "value": "",
+                    "mapping": mapping
                 }
             services.pop(0)
             if not services:
