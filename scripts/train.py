@@ -253,20 +253,21 @@ def main(
         data_size=args.dev.data_size
     )
     
-    if 'gpt2' in args.train.model_name_or_path.lower():
+    # if 'gpt2' in args.train.model_name_or_path.lower():
+    if True:
         optimizer = AdamW(
             model.parameters(),
             lr=args.train.learning_rate,
             eps=args.train.adam_eps
         )
-    elif 't5' in args.train.model_name_or_path.lower():
-        optimizer = Adafactor(
-            model.parameters(),
-            lr=args.train.learning_rate,
-            scale_parameter=False,
-            relative_step=False,
-            warmup_init=False
-        )
+    # elif 't5' in args.train.model_name_or_path.lower():
+    #     optimizer = Adafactor(
+    #         model.parameters(),
+    #         lr=args.train.learning_rate,
+    #         scale_parameter=False,
+    #         relative_step=False,
+    #         warmup_init=False
+    #     )
     else:
         raise ValueError("Unsupported model.")
     scheduler = None

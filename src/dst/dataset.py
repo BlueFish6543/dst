@@ -106,11 +106,15 @@ class TrainDataset(DSTDataset):
                 for service in turn['intent_dict']:
                     description = turn['intent_dict'][service]["description"]
                     active = turn['intent_dict'][service]["active"]
-                    # <SVC> service: description <INT> intent : description <INT> ...
+                    mapping = turn['intent_dict'][service]["mapping"]
+                    # Intent: Service: description 1: intent 2: intent ...
                     # <USR> ... <SYS> ... <USR> ...
                     model_input = description + " " + context
                     context_ids = self.tokenizer(model_input.strip())['input_ids']
-                    target_ids = self.tokenizer(active)['input_ids']
+                    if active:
+                        target_ids = self.tokenizer(str(mapping[active]))['input_ids']
+                    else:
+                        target_ids = self.tokenizer("")['input_ids']
                     over_length = self.create_ids(
                         dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
                     intent_examples += 1
@@ -121,16 +125,20 @@ class TrainDataset(DSTDataset):
                         description = turn['slot_dict'][service][slot]["description"]
                         requested = str(turn['slot_dict'][service][slot]["requested"]).lower()
                         value = turn['slot_dict'][service][slot]["value"]
+                        mapping = turn['slot_dict'][service][slot]["mapping"]
                         if requested == 'false' and not value:
                             skip_counter += 1
                             if not (skip_counter % 2):
                                 # Skip some examples to balance out intent and slot prediction tasks a bit
                                 continue
+                        if mapping and value:
+                            # Get the index of the categorical value
+                            value = str(mapping[value])
                         target = "requested" + self.separators["pair"] + requested + \
                             self.separators["default"] + "value" + self.separators["pair"] + value
 
-                        # <SVC> service : description <SLT> slot : description [<VAL> ... <SEP> ...]
-                        # <USR> ... <SYS> ... <USR> ...
+                        # Categorical/Non-categorical: Service: description Slot: description
+                        # [1: value 2: value ...] <USR> ... <SYS> ... <USR> ...
                         # requested = true/false <SEP> value = value
                         model_input = description + " " + context
                         context_ids = self.tokenizer(model_input.strip())['input_ids']
@@ -219,7 +227,7 @@ class TestDataset(DSTDataset):
                 # Intent
                 for service in turn['intent_dict']:
                     description = turn['intent_dict'][service]["description"]
-                    # <SVC> service: description <INT> intent : description <INT> ...
+                    # Intent: Service: description 1: intent 2: intent ...
                     # <USR> ... <SYS> ... <USR> ...
                     model_input = description + " " + context
                     context_ids = self.tokenizer(model_input.strip())['input_ids']
@@ -230,8 +238,9 @@ class TestDataset(DSTDataset):
                 for service in turn['slot_dict']:
                     for slot in turn['slot_dict'][service]:
                         description = turn['slot_dict'][service][slot]["description"]
-                        # <SVC> service : description <SLT> slot : description [<VAL> ... <SEP> ...]
-                        # <USR> ... <SYS> ... <USR> ...
+                        # Categorical/Non-categorical: Service: description Slot: description
+                        # [1: value 2: value ...] <USR> ... <SYS> ... <USR> ...
+                        # requested = true/false <SEP> value = value
                         model_input = description + " " + context
                         context_ids = self.tokenizer(model_input.strip())['input_ids']
                         over_length = self.create_ids(

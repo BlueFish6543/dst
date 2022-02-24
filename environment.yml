@@ -21,5 +21,6 @@ dependencies:
     - scipy
     - pandas
     - nltk
+    - setuptools==59.5.0
 
 # python -m pip install -U torch==1.10.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html
