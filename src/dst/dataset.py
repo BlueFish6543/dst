@@ -106,7 +106,7 @@ class TrainDataset(DSTDataset):
                 for service in turn['intent_dict']:
                     description = turn['intent_dict'][service]["description"]
                     active = turn['intent_dict'][service]["active"]
-                    # <SVC> service: description <INT> intent : description <INT> ...
+                    # <SVC> service : description <INT> intent : description <INT> ...
                     # <USR> ... <SYS> ... <USR> ...
                     model_input = description + " " + context
                     context_ids = self.tokenizer(model_input.strip())['input_ids']
@@ -129,7 +129,7 @@ class TrainDataset(DSTDataset):
                         target = "requested" + self.separators["pair"] + requested + \
                             self.separators["default"] + "value" + self.separators["pair"] + value
 
-                        # <SVC> service : description <SLT> slot : description [<VAL> ... <SEP> ...]
+                        # <SVC> service : description <SLT> slot : description [<VAL> ... <VAL> ...]
                         # <USR> ... <SYS> ... <USR> ...
                         # requested = true/false <SEP> value = value
                         model_input = description + " " + context

@@ -58,13 +58,17 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
+if [ -z ${EXPERIMENT_NAME+x} ]; then
+  echo "Please pass the experiment name to the command by prepending EXPERIMENT_NAME=experiment_name variable."
+  exit
+fi
+
 #! Full path to application executable:
 application="python -u -m scripts.train"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd/experiment-11/train.json \
--d data/preprocessed/sgd/experiment-11/dev.json \
--r models/experiment-11/model.1760000 \
+options="-t data/preprocessed/sgd/${EXPERIMENT_NAME}/train.json \
+-d data/preprocessed/sgd/${EXPERIMENT_NAME}/dev.json \
 -a configs/train_arguments.yaml -vv"
 
 #! Work directory (i.e. where the job will run):

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import random
 
 import re
 from typing import Optional, List
@@ -85,8 +86,9 @@ def get_intents(
             service_name = humanise(service["service_name"])
             service_description = service["description"]
 
-            description = (SEPARATORS["service"] + service_name +
+            description = (SEPARATORS["service"] + humanise(service["service_name"], remove_trailing_numbers=True) +
                            SEPARATORS["description"] + service_description).strip()
+            random.shuffle(service["intents"])
             for intent in service["intents"]:
                 # <SVC> service : description <INT> intent : description <INT> ...
                 intent_name = humanise(intent["name"])
@@ -117,12 +119,14 @@ def get_slots(
             for slot in service["slots"]:
                 # <SVC> service : description <SLT> slot : description
                 slot_name = humanise(slot["name"])
-                description = SEPARATORS["service"] + service_name + \
+                description = SEPARATORS["service"] + \
+                    humanise(service["service_name"], remove_trailing_numbers=True) + \
                     SEPARATORS["description"] + service_description + \
                     SEPARATORS["slot"] + slot_name + \
                     SEPARATORS["description"] + slot["description"]
                 if slot["is_categorical"]:
                     # <CAT> <SVC> service: description <SLT> slot : description <VAL> value <VAL> ...
+                    random.shuffle(slot["possible_values"])
                     description += SEPARATORS["values"] + SEPARATORS["values"].join(slot["possible_values"])
                 result[service_name][slot_name] = {
                     "description": description.strip(),
@@ -193,6 +197,7 @@ def main():
         "data": result,
         "separators": SEPARATORS
     }
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(out, f, indent=4, sort_keys=True)
 
