@@ -133,7 +133,7 @@ class TrainDataset(DSTDataset):
                                 continue
                         if mapping and value:
                             # Get the index of the categorical value
-                            value = str(mapping[value])
+                            value = "dontcare" if value == "dontcare" else str(mapping[value])
                         target = "requested" + self.separators["pair"] + requested + \
                             self.separators["default"] + "value" + self.separators["pair"] + value
 
