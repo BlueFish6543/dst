@@ -6,9 +6,11 @@ import random
 import re
 from typing import Optional, List
 
+from src.dst.utils import humanise
+
 SEPARATORS = {
     # "service": " <SVC> ",
-    # "description": " : ",
+    "description": " : ",
     "default": " <SEP> ",
     "pair": " = ",
     # "intent": " <INT> ",
@@ -83,12 +85,15 @@ def get_intents(
             service_name = service["service_name"]
             service_description = service["description"]
 
-            description = "Intent: Service: " + service_description.strip()
+            description = "Intent: Service: " + humanise(service_name, remove_trailing_numbers=True) + \
+                SEPARATORS["description"] + service_description.strip()
             random.shuffle(service["intents"])
             mapping = {}
             for index, intent in enumerate(service["intents"], 1):
-                # Intent: Service: description 1: description 2: description ...
-                description += " {}: ".format(index) + intent["description"].strip()
+                intent_name = intent["name"]
+                # Intent: Service: name : description 1: name : description 2: name : description ...
+                description += " {}: ".format(index) + intent_name + SEPARATORS["description"] + \
+                    intent["description"].strip()
                 mapping[intent["name"]] = index
 
             result[service_name] = {
@@ -115,8 +120,12 @@ def get_slots(
             result[service_name] = {}
 
             for slot in service["slots"]:
-                # Categorical/Non-categorical: Service: description Slot: description [1: value 2: value ...]
-                description = "Service: " + service_description.strip() + " Slot: " + slot["description"].strip()
+                slot_name = slot["name"]
+                # Categorical/Non-categorical:
+                # Service: name : description Slot: name : description [1: value 2: value ...]
+                description = "Service: " + humanise(service_name, remove_trailing_numbers=True) + \
+                    SEPARATORS["description"] + service_description.strip() + " Slot: " + \
+                    humanise(slot_name) + SEPARATORS["description"] + slot["description"].strip()
                 mapping = {}
                 if slot["is_categorical"]:
                     try:
@@ -132,7 +141,7 @@ def get_slots(
                 else:
                     description = "Non-categorical: " + description
 
-                result[service_name][slot["name"]] = {
+                result[service_name][slot_name] = {
                     "description": description.strip(),
                     "requested": False,
                     "value": "",
