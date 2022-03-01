@@ -273,7 +273,9 @@ class TestDataset(DSTDataset):
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
-        input_ids, attention_mask = self._pad(input_ids, self.pad_id)
+        # https://github.com/huggingface/transformers/pull/7552
+        # Padding on the left and using eos_token for padding
+        input_ids, attention_mask = self._pad(input_ids, self.eos_id, side="left")
         input_ids = torch.tensor(input_ids).long()
         attention_mask = torch.tensor(attention_mask).long()
         example_id = [example['example_id'] for example in batch]

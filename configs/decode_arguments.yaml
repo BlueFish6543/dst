@@ -2,6 +2,7 @@ decode:
   model_name_or_path: 'gpt2'
   max_seq_len: 1024 # maximum sequence length of inputs
   data_size: -1 # how many examples to decode
+  batch_size: 8
   decode_only: [] # which dialogue IDs to decode
   max_len: 1024 # maximum sequence length to be generated before <EOS>
   temperature: 1.0

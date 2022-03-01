@@ -101,13 +101,12 @@ def sequential_generation(args, batch, model, tokenizer):
 
 
 def decode(args, batch, model, tokenizer):
-    input_ids = batch['input_ids']
-    batch_size, ctx_len = input_ids.size()
-    assert batch_size == 1
+    batch_size, ctx_len = batch['input_ids'].size()
     try:
         if args.generate_api == 'huggingface':
             output = model.generate(
-                input_ids.to(DEVICE),
+                input_ids=batch['input_ids'].to(DEVICE),
+                attention_mask=batch['attention_mask'].to(DEVICE),
                 max_length=(ctx_len + args.max_len),
                 do_sample=False,
                 temperature=args.temperature,
@@ -140,7 +139,7 @@ def test(args, tokenizer, model):
     test_gen_dataloader = DataLoader(
         dataset,
         sampler=sampler,
-        batch_size=1,
+        batch_size=args.batch_size,
         collate_fn=dataset.collate_fn
     )
     model.eval()
