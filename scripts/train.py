@@ -148,7 +148,6 @@ def set_model(args):
     else:
         raise ValueError("Unsupported model.")
     vocabulary = Vocabulary()
-    vocabulary.add_special_tokens(args.special_tokens)
     tokenizer.add_special_tokens(vocabulary.special_tokens)
     model.resize_token_embeddings(len(tokenizer))
     model.to(DEVICE)
@@ -225,10 +224,6 @@ def main(
     args.train.dst_train_path = str(train_path)
     args.dev.dst_dev_path = str(dev_path)
 
-    with open(train_path, "r") as f:
-        separators = json.load(f)["separators"]
-        r = re.compile(r" <.+> ")
-        args.train.special_tokens = list(map(str.strip, filter(r.match, separators.values())))
     initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
 
     if ckpt_path:

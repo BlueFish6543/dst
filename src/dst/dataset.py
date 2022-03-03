@@ -49,7 +49,6 @@ class DSTDataset(torch.utils.data.Dataset):
         with open(filename, 'r') as f:
             dataset = json.load(f)
             self.data = dataset["data"]
-            self.separators = dataset["separators"]
         self._create_examples()
 
     @staticmethod
