@@ -4,18 +4,31 @@ import os
 import random
 
 import re
+import string
 from typing import Optional, List
 
-from src.dst.utils import humanise
-
-SEPARATORS = {
-    # "service": " <SVC> ",
-    "description": " : ",
-    "default": " <SEP> ",
-    "pair": " = ",
-    # "intent": " <INT> ",
-    # "slot": " <SLT> ",
-    # "values": " <VAL> "
+DONTCARE = {
+    "Banks_1": ["recipient_account_type"],
+    "Banks_2": ["recipient_account_type"],
+    "Buses_2": ["fare_type"],
+    "Buses_3": ["category"],
+    "Flights_1": ["airlines", "seating_class"],
+    "Flights_2": ["airlines", "seating_class"],
+    "Flights_3": ["airlines", "flight_class"],
+    "Flights_4": ["airlines", "seating_class"],
+    "Media_2": ["subtitle_language"],
+    "Media_3": ["subtitle_language"],
+    "Movies_1": ["show_type"],
+    "Music_1": ["playback_device"],
+    "Music_2": ["playback_device"],
+    "Music_3": ["device"],
+    "RentalCars_1": ["type"],
+    "RentalCars_2": ["car_type"],
+    "RentalCars_3": ["car_type"],
+    "Restaurants_1": ["price_range"],
+    "Restaurants_2": ["price_range"],
+    "Trains_1": ["class"],
+    "Travel_1": ["category"]
 }
 
 
@@ -33,26 +46,14 @@ def value_in_utterance(
 
 def process_frame(
         frame: dict,
-        intent_dict: dict,
+        turn_info: dict,
         previous_slots: dict,
-        slot_dict: dict,
         system_utterance: str,
         user_utterance: str
 ):
     service = frame["service"]
     state = frame["state"]
-
-    # Update active intent
-    if state["active_intent"] != "NONE":
-        intent_dict[service]["active"] = state["active_intent"]
-
-    # Update requested slots
-    for slot in state["requested_slots"]:
-        slot_dict[service][slot]["requested"] = True
-
-    if not state["slot_values"]:
-        # We are done
-        return
+    expected_output = "[states] "
 
     # Need to handle case when there are multiple possible values for the slot
     # We pick either the one that was previously in the state, or the one that
@@ -69,12 +70,42 @@ def process_frame(
     # Update
     previous_slots[service] = current_slots
 
-    # Update slot_dict
-    for slot, value in current_slots.items():
-        slot_dict[service][slot]["value"] = value
+    # Slot values
+    slot_mapping = turn_info[service]["slot_mapping"]
+    cat_values_mapping = turn_info[service]["cat_values_mapping"]
+    for i in range(len(slot_mapping) // 2):
+        slot = slot_mapping[i]
+        if slot in current_slots:
+            # Active
+            if slot in cat_values_mapping:
+                # Categorical
+                # if current_slots[slot] == "dontcare":
+                #     # "dontcare" is not in the schema
+                #     expected_output += f"{i}:dontcare "
+                # else:
+                #     expected_output += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
+                expected_output += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
+            else:
+                # Non-categorical
+                expected_output += f"{i}:{current_slots[slot]} "
+
+    # Active intent
+    expected_output += "[intents] "
+    if state["active_intent"] != "NONE":
+        expected_output += turn_info[service]["intent_mapping"][state["active_intent"]] + " "
+
+    # Requested slots
+    expected_output += "[req_slots] "
+    for i in range(len(slot_mapping) // 2):
+        slot = slot_mapping[i]
+        if slot in state["requested_slots"]:
+            expected_output += f"{i} "
+
+    # Update
+    turn_info[service]["expected_output"] = expected_output.strip()
 
 
-def get_intents(
+def generate_description(
         schema: List[dict],
         turn: dict
 ) -> dict:
@@ -83,70 +114,42 @@ def get_intents(
     for service in schema:
         if service["service_name"] == services[0]:
             service_name = service["service_name"]
-            service_description = service["description"]
+            description = ""
+            slot_mapping = {}  # two-way dictionary between slot names and indices
+            cat_values_mapping = {}  # slot to (value to index)
+            intent_mapping = {}  # intent name to index
 
-            description = "Intent: Service: " + humanise(service_name, remove_trailing_numbers=True) + \
-                SEPARATORS["description"] + service_description.strip()
+            random.shuffle(service["slots"])
+            for i, slot in enumerate(service["slots"]):
+                slot_name = slot["name"]
+                slot_description = slot["description"]
+                description += f"{i}:{slot_description} "
+                slot_mapping[slot_name] = i
+                slot_mapping[i] = slot_name
+
+                if slot["is_categorical"]:
+                    if service_name in DONTCARE and slot_name in DONTCARE[service_name] and \
+                            "dontcare" not in slot["possible_values"]:
+                        slot["possible_values"].append("dontcare")
+                    random.shuffle(slot["possible_values"])
+                    cat_values_mapping[slot_name] = {}  # value to index
+                    for s, value in zip(list(string.ascii_lowercase), slot["possible_values"]):
+                        description += f"{i}{s}) {value} "
+                        cat_values_mapping[slot_name][value] = f"{i}{s}"
+
             random.shuffle(service["intents"])
-            mapping = {}
-            for index, intent in enumerate(service["intents"], 1):
+            for i, intent in enumerate(service["intents"], 1):
                 intent_name = intent["name"]
-                # Intent: Service: name : description 1: name : description 2: name : description ...
-                description += " {}: ".format(index) + intent_name + SEPARATORS["description"] + \
-                    intent["description"].strip()
-                mapping[intent["name"]] = index
+                intent_description = intent["description"]
+                description += f"i{i}:{intent_description} "
+                intent_mapping[intent_name] = f"i{i}"
 
             result[service_name] = {
                 "description": description.strip(),
-                "active": "",
-                "mapping": mapping
+                "slot_mapping": slot_mapping,
+                "cat_values_mapping": cat_values_mapping,
+                "intent_mapping": intent_mapping
             }
-            services.pop(0)
-            if not services:
-                break
-    return result
-
-
-def get_slots(
-        schema: List[dict],
-        turn: dict
-) -> dict:
-    services = list(sorted([frame["service"] for frame in turn["frames"]]))
-    result = {}
-    for service in schema:
-        if service["service_name"] == services[0]:
-            service_name = service["service_name"]
-            service_description = service["description"]
-            result[service_name] = {}
-
-            for slot in service["slots"]:
-                slot_name = slot["name"]
-                # Categorical/Non-categorical:
-                # Service: name : description Slot: name : description [1: value 2: value ...]
-                description = "Service: " + humanise(service_name, remove_trailing_numbers=True) + \
-                    SEPARATORS["description"] + service_description.strip() + " Slot: " + \
-                    humanise(slot_name) + SEPARATORS["description"] + slot["description"].strip()
-                mapping = {}
-                if slot["is_categorical"]:
-                    try:
-                        # We treat numerical categorical slots as non-categorical
-                        _ = [int(s) for s in slot["possible_values"]]
-                        description = "Non-categorical: " + description
-                    except ValueError:
-                        random.shuffle(slot["possible_values"])
-                        for index, value in enumerate(slot["possible_values"], 1):
-                            description += " {}: ".format(index) + value.strip()
-                            mapping[value] = index
-                        description = "Categorical: " + description
-                else:
-                    description = "Non-categorical: " + description
-
-                result[service_name][slot_name] = {
-                    "description": description.strip(),
-                    "requested": False,
-                    "value": "",
-                    "mapping": mapping
-                }
             services.pop(0)
             if not services:
                 break
@@ -170,21 +173,15 @@ def process_file(
                 # We don't need to do anything else
 
             elif turn["speaker"] == "USER":
-                intent_dict = get_intents(schema, turn)
-                slot_dict = get_slots(schema, turn)
+                turn_info = generate_description(schema, turn)
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
-                    # Each frame represents one service (?)
-                    process_frame(frame, intent_dict, previous_slots,
-                                  slot_dict, system_utterance, user_utterance)
+                    # Each frame represents one service
+                    process_frame(frame, turn_info, previous_slots, system_utterance, user_utterance)
 
-                res = {
-                    "system_utterance": system_utterance,
-                    "user_utterance": user_utterance,
-                    "intent_dict": intent_dict,
-                    "slot_dict": slot_dict
-                }
-                result[dialogue_id].append(res)
+                turn_info["system_utterance"] = system_utterance
+                turn_info["user_utterance"] = user_utterance
+                result[dialogue_id].append(turn_info)
 
             else:
                 raise ValueError("Unknown speaker.")
@@ -208,11 +205,10 @@ def main():
             result.update(process_file(schema, data))
 
     out = {
-        "data": result,
-        "separators": SEPARATORS
+        "data": result
     }
     with open(args.out, "w") as f:
-        json.dump(out, f, indent=4, sort_keys=True)
+        json.dump(out, f, indent=4)
 
 
 if __name__ == '__main__':
