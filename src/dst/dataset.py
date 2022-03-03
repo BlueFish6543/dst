@@ -15,7 +15,7 @@ SPECIAL_TOKENS = {
     "eos_token": "<EOS>",
     "pad_token": "<PAD>",
     "sep_token": "<SEP>",
-    "additional_special_tokens": ["<USR>", "<SYS>"]
+    "additional_special_tokens": ["[user]", "[system]", "[states]", "[intents]", "[req_slots]"]
 }
 
 
@@ -78,13 +78,11 @@ class DSTDataset(torch.utils.data.Dataset):
 
 class TrainDataset(DSTDataset):
     def __init__(self, args, tokenizer, filename, data_size):
+        self.over_length = 0
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
         self.examples = []
-        over_length = 0
-        skip_counter = 0
-        intent_examples = 0
         for dialogue_id, dialogue in tqdm(
                 self.data.items(),
                 desc=f"Loading {self.filename}\n",
@@ -97,60 +95,21 @@ class TrainDataset(DSTDataset):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
                 if not system_utterance:
-                    utterance = f"<USR> {user_utterance} "
+                    utterance = f"[user] {user_utterance} "
                 else:
-                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                    utterance = f"[system] {system_utterance} [user] {user_utterance} "
                 context += utterance
 
-                # Intent
-                for service in turn['intent_dict']:
-                    description = turn['intent_dict'][service]["description"]
-                    active = turn['intent_dict'][service]["active"]
-                    mapping = turn['intent_dict'][service]["mapping"]
-                    # Intent: Service: description 1: intent 2: intent ...
-                    # <USR> ... <SYS> ... <USR> ...
-                    model_input = description + " " + context
-                    context_ids = self.tokenizer(model_input.strip())['input_ids']
-                    if active:
-                        target_ids = self.tokenizer(str(mapping[active]))['input_ids']
-                    else:
-                        target_ids = self.tokenizer("")['input_ids']
-                    over_length = self.create_ids(
-                        dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
-                    intent_examples += 1
-
-                # Iterate per slot
-                for service in turn['slot_dict']:
-                    for slot in turn['slot_dict'][service]:
-                        description = turn['slot_dict'][service][slot]["description"]
-                        requested = str(turn['slot_dict'][service][slot]["requested"]).lower()
-                        value = turn['slot_dict'][service][slot]["value"]
-                        mapping = turn['slot_dict'][service][slot]["mapping"]
-                        if requested == 'false' and not value:
-                            skip_counter += 1
-                            if not (skip_counter % 2):
-                                # Skip some examples to balance out intent and slot prediction tasks a bit
-                                continue
-                        if mapping and value:
-                            # Get the index of the categorical value
-                            value = "dontcare" if value == "dontcare" else str(mapping[value])
-                        target = "requested" + self.separators["pair"] + requested + \
-                            self.separators["default"] + "value" + self.separators["pair"] + value
-
-                        # Categorical/Non-categorical: Service: description Slot: description
-                        # [1: value 2: value ...] <USR> ... <SYS> ... <USR> ...
-                        # requested = true/false <SEP> value = value
-                        model_input = description + " " + context
-                        context_ids = self.tokenizer(model_input.strip())['input_ids']
-                        target_ids = self.tokenizer(target.strip())['input_ids']
-                        over_length = self.create_ids(
-                            dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length)
+                for service in turn:
+                    model_input = turn[service]["description"] + " " + context
+                    context_ids = self.tokenizer(model_input)['input_ids']
+                    target_ids = self.tokenizer(turn[service]["expected_output"])['input_ids']
+                    self.create_ids(dialogue_id, turn_index, context_ids, target_ids, user_utterance)
 
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
-        logger.info(f"Data statistics: {self.filename}: {intent_examples} intent examples")
-        logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
+        logger.info(f"Number of over-length examples: {self.filename}: {self.over_length} examples")
 
-    def create_ids(self, dialogue_id, turn_index, context_ids, target_ids, user_utterance, over_length):
+    def create_ids(self, dialogue_id, turn_index, context_ids, target_ids, user_utterance):
         target_len = len(target_ids)
         if 'gpt2' in self.args.model_name_or_path.lower():
             # context <BOS> target <EOS>
@@ -167,7 +126,7 @@ class TrainDataset(DSTDataset):
         if len(input_ids) > self.max_seq_len:
             # Handle over-length example
             logger.warning(f"{dialogue_id}({turn_index}) exceeds maximum sequence length, truncating...")
-            over_length += 1
+            self.over_length += 1
             input_ids = input_ids[-self.max_seq_len:]
             label_ids = label_ids[-self.max_seq_len:]
         assert len(input_ids) <= self.max_seq_len
@@ -177,7 +136,6 @@ class TrainDataset(DSTDataset):
             'user_utterance': user_utterance,  # useful for results analysis
             'example_id': f"{dialogue_id}_{turn_index}",
         })
-        return over_length
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
@@ -200,6 +158,7 @@ class TrainDataset(DSTDataset):
 class TestDataset(DSTDataset):
     def __init__(self, args, tokenizer, filename, data_size):
         self.to_decode: set[str] = set(args.decode_only)
+        self.over_length = 0
         super().__init__(args, tokenizer, filename, data_size)
 
     def _create_examples(self):
@@ -219,39 +178,20 @@ class TestDataset(DSTDataset):
                 user_utterance = turn['user_utterance']
                 system_utterance = turn['system_utterance']
                 if not system_utterance:
-                    utterance = f"<USR> {user_utterance} "
+                    utterance = f"[user] {user_utterance} "
                 else:
-                    utterance = f"<SYS> {system_utterance} <USR> {user_utterance} "
+                    utterance = f"[system] {system_utterance} [user] {user_utterance} "
                 context += utterance
 
-                # Intent
-                for service in turn['intent_dict']:
-                    description = turn['intent_dict'][service]["description"]
-                    # Intent: Service: description 1: intent 2: intent ...
-                    # <USR> ... <SYS> ... <USR> ...
-                    model_input = description + " " + context
-                    context_ids = self.tokenizer(model_input.strip())['input_ids']
-                    over_length = self.create_ids(
-                        dialogue_id, turn_index, context_ids, user_utterance, over_length, service=service)
-
-                # Iterate per slot
-                for service in turn['slot_dict']:
-                    for slot in turn['slot_dict'][service]:
-                        description = turn['slot_dict'][service][slot]["description"]
-                        # Categorical/Non-categorical: Service: description Slot: description
-                        # [1: value 2: value ...] <USR> ... <SYS> ... <USR> ...
-                        # requested = true/false <SEP> value = value
-                        model_input = description + " " + context
-                        context_ids = self.tokenizer(model_input.strip())['input_ids']
-                        over_length = self.create_ids(
-                            dialogue_id, turn_index, context_ids, user_utterance, over_length,
-                            service=service, slot=slot)
+                for service in turn:
+                    model_input = turn[service]["description"] + " " + context
+                    context_ids = self.tokenizer(model_input)['input_ids']
+                    self.create_ids(dialogue_id, turn_index, context_ids, user_utterance)
 
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
-        logger.info(f"Number of over-length examples: {self.filename}: {over_length} examples")
+        logger.info(f"Number of over-length examples: {self.filename}: {self.over_length} examples")
 
-    def create_ids(self, dialogue_id, turn_index, context_ids, user_utterance, over_length,
-                   service=None, slot=None):
+    def create_ids(self, dialogue_id, turn_index, context_ids, user_utterance):
         if 'gpt2' in self.args.model_name_or_path.lower():
             # context <BOS> target <EOS>
             dst_input_ids = context_ids + [self.tokenizer.bos_token_id]
@@ -260,16 +200,13 @@ class TestDataset(DSTDataset):
         else:
             raise ValueError("Unsupported model.")
         if len(dst_input_ids) > self.max_seq_len:
-            over_length += 1
+            self.over_length += 1
             dst_input_ids = dst_input_ids[-self.max_seq_len:]
         self.examples.append({
             'input_ids': dst_input_ids,
             'example_id': f"{dialogue_id}_{turn_index}",
             'user_utterance': user_utterance,
-            'service': service,
-            'slot': slot
         })
-        return over_length
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
