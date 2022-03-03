@@ -84,7 +84,6 @@ def get_intents(
             service_description = service["description"]
 
             description = "Intent: Service: " + service_description.strip()
-            random.shuffle(service["intents"])
             mapping = {}
             for index, intent in enumerate(service["intents"], 1):
                 # Intent: Service: description 1: description 2: description ...
@@ -124,7 +123,6 @@ def get_slots(
                         _ = [int(s) for s in slot["possible_values"]]
                         description = "Non-categorical: " + description
                     except ValueError:
-                        random.shuffle(slot["possible_values"])
                         for index, value in enumerate(slot["possible_values"], 1):
                             description += " {}: ".format(index) + value.strip()
                             mapping[value] = index
