@@ -99,10 +99,11 @@ class TrainDataset(DSTDataset):
                     utterance = f"[system] {system_utterance} [user] {user_utterance} "
                 context += utterance
 
-                for service in turn:
-                    model_input = turn[service]["description"] + " " + context
+                frames = turn['frames']
+                for service in frames:
+                    model_input = frames[service]["description"] + " " + context
                     context_ids = self.tokenizer(model_input)['input_ids']
-                    target_ids = self.tokenizer(turn[service]["expected_output"])['input_ids']
+                    target_ids = self.tokenizer(frames[service]["expected_output"])['input_ids']
                     self.create_ids(dialogue_id, turn_index, context_ids, target_ids, user_utterance)
 
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
@@ -182,8 +183,9 @@ class TestDataset(DSTDataset):
                     utterance = f"[system] {system_utterance} [user] {user_utterance} "
                 context += utterance
 
-                for service in turn:
-                    model_input = turn[service]["description"] + " " + context
+                frames = turn['frames']
+                for service in frames:
+                    model_input = frames[service]["description"] + " " + context
                     context_ids = self.tokenizer(model_input)['input_ids']
                     self.create_ids(dialogue_id, turn_index, context_ids, user_utterance)
 

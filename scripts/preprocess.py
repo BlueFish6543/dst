@@ -179,9 +179,11 @@ def process_file(
                     # Each frame represents one service
                     process_frame(frame, turn_info, previous_slots, system_utterance, user_utterance)
 
-                turn_info["system_utterance"] = system_utterance
-                turn_info["user_utterance"] = user_utterance
-                result[dialogue_id].append(turn_info)
+                result[dialogue_id].append({
+                    "frames": turn_info,
+                    "system_utterance": system_utterance,
+                    "user_utterance": user_utterance
+                })
 
             else:
                 raise ValueError("Unknown speaker.")
