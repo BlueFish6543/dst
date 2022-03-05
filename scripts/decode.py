@@ -152,13 +152,8 @@ def test(args, tokenizer, model):
             bs_pred_str = decode(args, batch, model, tokenizer)
             usr_utterance = batch['user_utterance'][0]
             service = batch['service'][0]
-            slot = batch['slot'][0]
-            if slot is None:
-                collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
-                collector[dialogue_id][turn_idx][service]["*intent*"] = bs_pred_str
-            else:
-                collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
-                collector[dialogue_id][turn_idx][service][slot] = bs_pred_str
+            collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
+            collector[dialogue_id][turn_idx][service]["predicted_str"] = bs_pred_str
     return dict(collector)
 
 

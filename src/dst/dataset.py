@@ -146,7 +146,6 @@ class TrainDataset(DSTDataset):
         label_ids, _ = self._pad(label_ids, self.ignore_token_id)
         label_ids = torch.tensor(label_ids).long()
         user_utterances = [example['user_utterance'] for example in batch]
-
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
@@ -187,12 +186,12 @@ class TestDataset(DSTDataset):
                 for service in frames:
                     model_input = frames[service]["description"] + " " + context
                     context_ids = self.tokenizer(model_input)['input_ids']
-                    self.create_ids(dialogue_id, turn_index, context_ids, user_utterance)
+                    self.create_ids(dialogue_id, turn_index, context_ids, user_utterance, service)
 
         logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
         logger.info(f"Number of over-length examples: {self.filename}: {self.over_length} examples")
 
-    def create_ids(self, dialogue_id, turn_index, context_ids, user_utterance):
+    def create_ids(self, dialogue_id, turn_index, context_ids, user_utterance, service):
         if 'gpt2' in self.args.model_name_or_path.lower():
             # context <BOS> target <EOS>
             dst_input_ids = context_ids + [self.tokenizer.bos_token_id]
@@ -207,6 +206,7 @@ class TestDataset(DSTDataset):
             'input_ids': dst_input_ids,
             'example_id': f"{dialogue_id}_{turn_index}",
             'user_utterance': user_utterance,
+            'service': service
         })
 
     def collate_fn(self, batch):
@@ -217,14 +217,12 @@ class TestDataset(DSTDataset):
         example_id = [example['example_id'] for example in batch]
         user_utterances = [example['user_utterance'] for example in batch]
         services = [example['service'] for example in batch]
-        slots = [example['slot'] for example in batch]
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
             'example_id': example_id,
             'user_utterance': user_utterances,
-            'service': services,
-            'slot': slots
+            'service': services
         }
 
 

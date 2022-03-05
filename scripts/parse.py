@@ -5,68 +5,78 @@ import re
 import sys
 from argparse import ArgumentParser
 from distutils.dir_util import copy_tree
-from typing import Tuple
 
 from omegaconf import OmegaConf
 
 logger = logging.getLogger(__name__)
 
 
-def extract_intent(
-        schema: dict,
-        predicted_str: str,
-        frame: dict,
-        mapping: dict
-):
-    for intent in schema["intents"]:
-        if str(mapping[intent["name"]]) == predicted_str:
-            frame["state"]["active_intent"] = intent["name"]
-            return
-    # Default to "NONE"
-    frame["state"]["active_intent"] = "NONE"
-
-
-def parse_predicted_slot_string(
+def parse_predicted_string(
         dialogue_id: str,
         i: str,
         predicted_str: str,
-        separators: dict,
-        mapping: dict
-) -> Tuple[bool, str]:
-    pair = separators["pair"].strip()
-    default = separators["default"].strip()
-
-    # Expect "requested = true/false <SEP> value = value"
-    output = predicted_str.split(default)
-    if len(output) != 2:
+        slot_mapping: dict,
+        cat_values_mapping: dict,
+        intent_mapping: dict
+) -> dict:
+    state = {
+        "values": {},
+        "intent": "NONE",
+        "requested": []
+    }
+    # Expect [states] 0:value 1:1a ... [intents] i1 [req_slots] 2 ...
+    match = re.search(r"\[states](.*)\[intents](.*)\[req_slots](.*)", predicted_str)
+    if match is None:
         # String was not in expected format
         logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
-        # Default to False for requested slots
-        return False, ""
+        return state
 
-    requested = output[0].split(pair)
-    if len(requested) != 2 or requested[0].strip() != "requested":
-        # String was not in expected format
-        logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
-        # Default to False for requested slots
-        return False, ""
-    requested = requested[1].strip().lower() == "true"
+    # Parse slot values
+    substrings = [s.strip() for s in match.group(1).split(":")]
+    for i in range(len(substrings) - 1):
+        left = substrings[i].rsplit(" ", 1)
+        right = substrings[i + 1].rsplit(" ", 1)
+        if (len(left) != 2 and i > 0) or (len(right) != 2 and i < len(substrings) - 2):
+            # String was not in expected format
+            logger.warning(f"Could not extract slot values in {predicted_str} in {dialogue_id}_{i}.")
+            continue
+        try:
+            slot = slot_mapping[left[-1].strip()]
+            if slot in cat_values_mapping:
+                success = False
+                # Invert the mapping to get the categorical value
+                for key, value in cat_values_mapping[slot].items():
+                    if value == right[0].strip():
+                        state["values"][slot] = key
+                        success = True
+                        break
+                if not success:
+                    logger.warning(f"Could not extract categorical value for slot {left[-1].strip()} in "
+                                   f"{predicted_str} in {dialogue_id}_{i}.")
+            else:
+                # Non-categorical
+                state["values"][slot] = right[0].strip()
+        except KeyError:
+            logger.warning(f"Could not extract slot {left[-1].strip()} in {predicted_str} in {dialogue_id}_{i}.")
 
-    value = output[1].split(pair)
-    if len(value) != 2 or value[0].strip() != "value":
-        # String was not in expected format
-        logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{i}.")
-        # Default to False for requested slots
-        return False, ""
-    value = value[1].strip()
+    # Parse intent
+    intent = match.group(2).strip()
+    if intent:
+        try:
+            state["intent"] = intent_mapping[intent]
+        except KeyError:
+            logger.warning(f"Could not extract intent in {predicted_str} in {dialogue_id}_{i}.")
 
-    # Check if categorical and if value was one of available categorical slots
-    for cat_value, index in mapping.items():
-        if str(index) == value:
-            value = cat_value
-            break
+    # Parse requested slots
+    requested = match.group(3).strip().split()
+    for index in requested:
+        try:
+            state["requested"].append(slot_mapping[index.strip()])
+        except KeyError:
+            logger.warning(f"Could not extract requested slot {index.strip()} in "
+                           f"{predicted_str} in {dialogue_id}_{i}.")
 
-    return requested, value
+    return state
 
 
 def populate_slots(
@@ -94,46 +104,41 @@ def populate_slots(
                     service_schema = s
                     break
             assert service_schema is not None
-            service_schema["slots"].append({"name": "*intent*"})  # for active intent prediction
+            predicted_str = predicted_data[i][service_name]
 
-            for slot_name in [slot["name"] for slot in service_schema["slots"]]:
-                # Loop over slots
-                predicted_str = predicted_data[i][service_name][slot_name]
-                # Some checks
-                if 'gpt2' in model_name.lower():
-                    try:
-                        # Should contain the dialogue history
-                        # We call replace() to avoid issues with extra whitespace
-                        assert template_turn["utterance"].replace(" ", "") in predicted_str.replace(" ", "")
-                    except AssertionError:
-                        logger.warning(f"{predicted_str} in {dialogue_id}_{i} does not match user utterance. Skipping.")
-                        continue
-                if "<EOS>" not in predicted_str:
-                    logger.warning(f"No <EOS> token in {dialogue_id}_{i}. Skipping.")
+            # Some checks
+            if 'gpt2' in model_name.lower():
+                try:
+                    # Should contain the dialogue history
+                    # We call replace() to avoid issues with extra whitespace
+                    assert template_turn["utterance"].replace(" ", "") in predicted_str.replace(" ", "")
+                except AssertionError:
+                    logger.warning(f"{predicted_str} in {dialogue_id}_{i} does not match user utterance. Skipping.")
                     continue
+            if "<EOS>" not in predicted_str:
+                logger.warning(f"No <EOS> token in {dialogue_id}_{i}. Skipping.")
+                continue
 
-                # Extract string between <BOS> and <EOS>
-                if 'gpt2' in model_name.lower():
-                    predicted_str = re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1).strip()
-                elif 't5' in model_name.lower():
-                    predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
-                else:
-                    raise ValueError("Unsupported model.")
+            # Extract string between <BOS> and <EOS>
+            if 'gpt2' in model_name.lower():
+                predicted_str = re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1).strip()
+            elif 't5' in model_name.lower():
+                predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
+            else:
+                raise ValueError("Unsupported model.")
 
-                if slot_name == "*intent*":
-                    # Active intent prediction
-                    extract_intent(service_schema, predicted_str, frame,
-                                   data_turn["intent_dict"][service_name]["mapping"])
-                else:
-                    # Requested slots and slot values prediction
-                    requested, value = parse_predicted_slot_string(
-                        dialogue_id, i, predicted_str, separators,
-                        data_turn["slot_dict"][service_name][slot_name]["mapping"])
-                    if requested:
-                        frame["state"]["requested_slots"].append(slot_name)
-                    if value:
-                        # Add to frame if not empty string
-                        frame["state"]["slot_values"][slot_name] = [value]
+            state = parse_predicted_string(
+                dialogue_id, i, predicted_str,
+                data_turn["frames"][service_name]["slot_mapping"],
+                data_turn["frames"][service_name]["cat_values_mapping"],
+                data_turn["frames"][service_name]["intent_mapping"]
+            )
+            # Update
+            for slot, value in state["values"]:
+                frame["state"]["slot_values"][slot] = [value]
+            frame["state"]["active_intent"] = state["intent"]
+            for requested in state["requested"]:
+                frame["state"]["requested_slots"].append(requested)
 
 
 def parse(

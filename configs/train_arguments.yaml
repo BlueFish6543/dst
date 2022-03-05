@@ -7,8 +7,8 @@ train:
   max_seq_len: 1024 # maximum sequence length
   epochs: 4 # maximum number of epochs
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
-  batch_size: 4
-  gradient_accumulation_steps: 4 # gradients applied every this many batches to the output
+  batch_size: 32
+  gradient_accumulation_steps: 1 # gradients applied every this many batches to the output
   max_grad_norm: 1.0
   use_scheduler: false
   warmup_steps: 0
@@ -29,8 +29,8 @@ dev:
   model_name_or_path: 't5-base'
   max_seq_len: 1024 # maximum sequence length
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
-  eval_interval: 320000 # number of examples after which the model is evaluated
-  batch_size: 8
+  eval_interval: 40000 # number of examples after which the model is evaluated
+  batch_size: 32
   verbose:
     disable_display: false
 

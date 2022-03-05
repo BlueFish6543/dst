@@ -117,7 +117,7 @@ def generate_description(
             description = ""
             slot_mapping = {}  # two-way dictionary between slot names and indices
             cat_values_mapping = {}  # slot to (value to index)
-            intent_mapping = {}  # intent name to index
+            intent_mapping = {}  # two-way dictionary between intent names and indices
 
             random.shuffle(service["slots"])
             for i, slot in enumerate(service["slots"]):
@@ -143,6 +143,7 @@ def generate_description(
                 intent_description = intent["description"]
                 description += f"i{i}:{intent_description} "
                 intent_mapping[intent_name] = f"i{i}"
+                intent_mapping[f"i{i}"] = intent_name
 
             result[service_name] = {
                 "description": description.strip(),

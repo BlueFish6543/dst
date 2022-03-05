@@ -12,7 +12,7 @@
 #! Name of the job:
 #SBATCH -J decode
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
-#SBATCH -A BYRNE-SL3-GPU
+#SBATCH -A BYRNE-SL2-GPU
 #! How many whole nodes should be allocated?
 #SBATCH --nodes=1
 #! How many (MPI) tasks will there be in total?
@@ -25,7 +25,7 @@
 #SBATCH --time=12:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
-#SBATCH --array=0-4
+#SBATCH --array=0-7
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -59,18 +59,16 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
-#STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
-#STEPARRAY=(1760000 1920000 2080000 2240000 2400000 2560000 2720000 2880000 3040000)
-STEPARRAY=("v1" "v2" "v3" "v4" "v5")
+STEPARRAY=(400000 440000 480000 520000 560000 600000 640000 680000)
 STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
 
 #! Full path to application executable:
 application="python -u -m scripts.decode"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd-x/${STEP}/experiment-11/test.json \
+options="-t data/preprocessed/sgd/d3st/test.json \
 -a configs/decode_arguments.yaml \
--c models/experiment-11-1/model.2560000 -hyp decode/sgd-x/${STEP} -vv"
+-c models/d3st-1/${STEP} -hyp decode -vv"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

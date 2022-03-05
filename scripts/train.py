@@ -10,6 +10,7 @@ from pathlib import Path
 import click
 import torch
 from omegaconf import OmegaConf
+from torch import nn
 from torch.utils.data import (
     DataLoader,
     RandomSampler,
@@ -62,7 +63,7 @@ def score_dev(args, dataloader, model):
                 attention_mask=batch['attention_mask'].to(DEVICE),
                 labels=batch['label_ids'].to(DEVICE)
             )
-        loss_total += output.loss.item()
+        loss_total += output.loss.mean().item()
     return loss_total / num_batches, time.time() - start_time
 
 
@@ -102,8 +103,8 @@ def train(args, tokenizer, model, train_dataloader, dev_dataloader,
                 attention_mask=batch['attention_mask'].to(DEVICE),
                 labels=batch['label_ids'].to(DEVICE),
             )
-            loss = output.loss
-            loss_disp += output.loss.item()
+            loss = output.loss.mean()
+            loss_disp += output.loss.mean().item()
             gstep += 1
             # Update model
             if loss.item() != 0:
@@ -150,6 +151,7 @@ def set_model(args):
     vocabulary = Vocabulary()
     tokenizer.add_special_tokens(vocabulary.special_tokens)
     model.resize_token_embeddings(len(tokenizer))
+    model = nn.DataParallel(model)
     model.to(DEVICE)
     return config, tokenizer, model
 

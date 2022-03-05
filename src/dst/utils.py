@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from omegaconf import OmegaConf
+from torch import nn
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGeneration, T5Tokenizer
 
 logger = logging.getLogger(__name__)
@@ -32,12 +33,12 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     save_path = f"{ckpt_path}/model.{step}"
     logger.info(f"Save model in {save_path}!")
     tokenizer.save_pretrained(save_path)
-    model.save_pretrained(save_path)
+    model.module.save_pretrained(save_path)
     OmegaConf.save(args, f"{ckpt_path}/model_config.yaml")
-    torch.save({
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict()
-    }, os.path.join(save_path, "checkpoint.pth"))
+    state_dict = {'optimizer_state_dict': optimizer.state_dict()}
+    if scheduler is not None:
+        state_dict['scheduler_state_dict'] = scheduler.state_dict()
+    torch.save(state_dict, os.path.join(save_path, "checkpoint.pth"))
 
 
 def load_model(args, device: torch.device):
@@ -51,6 +52,7 @@ def load_model(args, device: torch.device):
         model = T5ForConditionalGeneration.from_pretrained(ckpt_path)
     else:
         raise ValueError("Unsupported model.")
+    model = nn.DataParallel(model)
     model.to(device)
     return model.config, tokenizer, model
 
