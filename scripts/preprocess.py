@@ -118,15 +118,10 @@ def get_slots(
                 description = "Service: " + service_description.strip() + " Slot: " + slot["description"].strip()
                 mapping = {}
                 if slot["is_categorical"]:
-                    try:
-                        # We treat numerical categorical slots as non-categorical
-                        _ = [int(s) for s in slot["possible_values"]]
-                        description = "Non-categorical: " + description
-                    except ValueError:
-                        for index, value in enumerate(slot["possible_values"], 1):
-                            description += " {}: ".format(index) + value.strip()
-                            mapping[value] = index
-                        description = "Categorical: " + description
+                    for index, value in enumerate(slot["possible_values"], 1):
+                        description += " {}: ".format(index) + value.strip()
+                        mapping[value] = index
+                    description = "Categorical: " + description
                 else:
                     description = "Non-categorical: " + description
 
