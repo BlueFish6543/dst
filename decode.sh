@@ -68,7 +68,7 @@ application="python -u -m scripts.decode"
 #! Run options for the application:
 options="-t data/preprocessed/sgd/d3st/test.json \
 -a configs/decode_arguments.yaml \
--c models/d3st-1/${STEP} -hyp decode -vv"
+-c models/d3st-1/model.${STEP} -hyp decode -vv"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
