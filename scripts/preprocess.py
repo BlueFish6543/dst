@@ -7,12 +7,12 @@ import re
 from typing import Optional, List
 
 SEPARATORS = {
-    # "service": " <SVC> ",
+    "service": " <SVC> ",
     # "description": " : ",
     "default": " <SEP> ",
     "pair": " = ",
     # "intent": " <INT> ",
-    # "slot": " <SLT> ",
+    "slot": " <SLT> ",
     # "values": " <VAL> "
 }
 
@@ -83,10 +83,10 @@ def get_intents(
             service_name = service["service_name"]
             service_description = service["description"]
 
-            description = "Intent: Service: " + service_description.strip()
+            description = SEPARATORS["service"] + service_description.strip()
             mapping = {}
             for index, intent in enumerate(service["intents"], 1):
-                # Intent: Service: description 1: description 2: description ...
+                # <SVC> description 1: description 2: description ...
                 description += " {}: ".format(index) + intent["description"].strip()
                 mapping[intent["name"]] = index
 
@@ -114,16 +114,14 @@ def get_slots(
             result[service_name] = {}
 
             for slot in service["slots"]:
-                # Categorical/Non-categorical: Service: description Slot: description [1: value 2: value ...]
-                description = "Service: " + service_description.strip() + " Slot: " + slot["description"].strip()
+                # <SVC> description <SLT> description [1: value 2: value ...]
+                description = SEPARATORS["service"] + service_description.strip() + \
+                    SEPARATORS["slot"] + slot["description"].strip()
                 mapping = {}
                 if slot["is_categorical"]:
                     for index, value in enumerate(slot["possible_values"], 1):
                         description += " {}: ".format(index) + value.strip()
                         mapping[value] = index
-                    description = "Categorical: " + description
-                else:
-                    description = "Non-categorical: " + description
 
                 result[service_name][slot["name"]] = {
                     "description": description.strip(),
