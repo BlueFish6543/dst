@@ -32,32 +32,41 @@ def parse_predicted_string(
         return state
 
     # Parse slot values
-    substrings = [s.strip() for s in match.group(1).split(":")]
-    for i in range(len(substrings) - 1):
-        left = substrings[i].rsplit(" ", 1)
-        right = substrings[i + 1].rsplit(" ", 1)
-        if (len(left) != 2 and i > 0) or (len(right) != 2 and i < len(substrings) - 2):
-            # String was not in expected format
-            logger.warning(f"Could not extract slot values in {predicted_str} in {dialogue_id}_{i}.")
-            continue
-        try:
-            slot = slot_mapping[left[-1].strip()]
-            if slot in cat_values_mapping:
-                success = False
-                # Invert the mapping to get the categorical value
-                for key, value in cat_values_mapping[slot].items():
-                    if value == right[0].strip():
-                        state["values"][slot] = key
-                        success = True
-                        break
-                if not success:
-                    logger.warning(f"Could not extract categorical value for slot {left[-1].strip()} in "
-                                   f"{predicted_str} in {dialogue_id}_{i}.")
-            else:
-                # Non-categorical
-                state["values"][slot] = right[0].strip()
-        except KeyError:
-            logger.warning(f"Could not extract slot {left[-1].strip()} in {predicted_str} in {dialogue_id}_{i}.")
+    if match.group(1).strip():  # if the string is not empty
+        substrings = \
+            re.compile(r"(?<!^)\s+(?=[0-9]+:)(?![0-9]{1,2}:[0-9]{2}(?:\s+[0-9]+:|$))").split(match.group(1).strip())
+        # (?![0-9]{1,2}:[0-9]{2}(?:\s+[0-9]+:|$)) is needed to avoid splitting strings such as
+        # `0:morning 10:30` before `10:30`. However, in cases such as `0:afternoon 1:12 pm`
+        # we want the string to split before `1:12 pm`. Note that in cases such as
+        # `0:something 1:25` we would probably not split the string correctly
+        # We do not have a good solution for this at the moment
+        for pair in substrings:
+            pair = pair.strip().split(":", 1)  # slot value pair
+            if len(pair) != 2:
+                # String was not in expected format
+                logger.warning(f"Could not extract slot values in {predicted_str} in {dialogue_id}_{i}.")
+                continue
+            try:
+                slot = slot_mapping[pair[0].strip()]
+                if slot in cat_values_mapping:
+                    success = False
+                    # Invert the mapping to get the categorical value
+                    for key, value in cat_values_mapping[slot].items():
+                        if value == pair[1].strip():
+                            state["values"][slot] = [key]
+                            success = True
+                            break
+                    if not success:
+                        logger.warning(f"Could not extract categorical value for slot {pair[0].strip()} in "
+                                       f"{predicted_str} in {dialogue_id}_{i}.")
+                else:
+                    # Non-categorical
+                    # Sometimes we may get examples like `0:morning 10:30` where it is ambiguous whether
+                    # `10:30` should be part of the value. We add both `morning` and `morning 10:30` in
+                    # such cases
+                    state["values"][slot] = [pair[1].strip()]
+            except KeyError:
+                logger.warning(f"Could not extract slot {pair[0].strip()} in {predicted_str} in {dialogue_id}_{i}.")
 
     # Parse intent
     intent = match.group(2).strip()
@@ -85,8 +94,7 @@ def populate_slots(
         dialogue_id: str,
         schema: dict,
         model_name: str,
-        data: dict,
-        separators: dict
+        data: dict
 ):
     for i in predicted_data:
         # Loop over turns
@@ -104,7 +112,7 @@ def populate_slots(
                     service_schema = s
                     break
             assert service_schema is not None
-            predicted_str = predicted_data[i][service_name]
+            predicted_str = predicted_data[i][service_name]["predicted_str"]
 
             # Some checks
             if 'gpt2' in model_name.lower():
@@ -134,8 +142,8 @@ def populate_slots(
                 data_turn["frames"][service_name]["intent_mapping"]
             )
             # Update
-            for slot, value in state["values"]:
-                frame["state"]["slot_values"][slot] = [value]
+            for slot, value_list in state["values"].items():
+                frame["state"]["slot_values"][slot] = value_list
             frame["state"]["active_intent"] = state["intent"]
             for requested in state["requested"]:
                 frame["state"]["requested_slots"].append(requested)
@@ -146,7 +154,6 @@ def parse(
         predictions: dict,
         root: str,
         data: dict,
-        separators: dict
 ):
     with open(os.path.join(root, "experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
@@ -166,7 +173,7 @@ def parse(
                         logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
                         continue
                     populate_slots(predicted_data, dialogue, dialogue_id, schema, model_name,
-                                   data[dialogue_id], separators)
+                                   data[dialogue_id])
             with open(os.path.join(root, file), "w") as f:
                 json.dump(dialogues, f, indent=4)
 
@@ -207,7 +214,6 @@ def main():
     with open(args.json, "r") as f:
         dataset = json.load(f)
         data = dataset["data"]
-        separators = dataset["separators"]
 
     for root, dirs, files in os.walk(args.directory):
         for file in files:
@@ -217,7 +223,7 @@ def main():
                 logger.info(f"Parsing {root} directory.")
                 with open(os.path.join(root, file), "r") as f:
                     predictions = json.load(f)
-                    parse(schema, predictions, root, data, separators)
+                    parse(schema, predictions, root, data)
 
 
 if __name__ == '__main__':

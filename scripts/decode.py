@@ -106,7 +106,7 @@ def decode(args, batch, model, tokenizer):
     assert batch_size == 1
     try:
         if args.generate_api == 'huggingface':
-            output = model.generate(
+            output = model.module.generate(
                 input_ids.to(DEVICE),
                 max_length=(ctx_len + args.max_len),
                 do_sample=False,

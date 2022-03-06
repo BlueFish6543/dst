@@ -231,7 +231,7 @@ def main(
     if ckpt_path:
         # Load from checkpoint
         args.train.checkpoint = str(ckpt_path)
-        config, tokenizer, model, = load_model(args.train, device=DEVICE)
+        config, tokenizer, model = load_model(args.train, device=DEVICE)
     else:
         config, tokenizer, model = set_model(args.train)
 

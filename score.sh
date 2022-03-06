@@ -24,7 +24,7 @@
 #SBATCH --time=03:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
-#SBATCH --array=0-4
+#SBATCH --array=0-7
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -61,18 +61,16 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
-#STEPARRAY=(160000 320000 480000 640000 800000 960000 1120000 1280000 1440000 1600000)
-#STEPARRAY=(1760000 1920000 2080000 2240000 2400000 2560000 2720000 2880000 3040000)
-STEPARRAY=("v1" "v2" "v3" "v4" "v5")
+STEPARRAY=(400000 440000 480000 520000 560000 600000 640000 680000)
 STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
 
 #! Full path to application executable:
 application="python -u -m scripts.score"
 
 #! Run options for the application:
-options="--prediction_dir decode/sgd-x/${STEP}/experiment-11-1/model.2560000 \
---raw_data_dir data/raw/sgd-x/${STEP} --eval_set test \
---output_metric_file decode/sgd-x/${STEP}/experiment-11-1/model.2560000/metrics.json"
+options="--prediction_dir decode/d3st-1/model.${STEP}/ \
+--raw_data_dir data/raw/sgd/ --eval_set test \
+--output_metric_file decode/d3st-1/model.${STEP}/metrics.json"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

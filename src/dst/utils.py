@@ -54,7 +54,7 @@ def load_model(args, device: torch.device):
         raise ValueError("Unsupported model.")
     model = nn.DataParallel(model)
     model.to(device)
-    return model.config, tokenizer, model
+    return model.module.config, tokenizer, model
 
 
 def load_checkpoint(ckpt_path, optimizer, scheduler):
