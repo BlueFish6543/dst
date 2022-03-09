@@ -24,7 +24,7 @@
 #SBATCH --time=03:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
-#SBATCH --array=0-7
+#SBATCH --array=0-3
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -61,7 +61,7 @@ eval "$(conda shell.bash hook)"
 conda activate /home/zxc22/.conda/envs/dst
 which python
 
-STEPARRAY=(400000 440000 480000 520000 560000 600000 640000 680000)
+STEPARRAY=(1240000 1320000 1400000 1480000)
 STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
 
 #! Full path to application executable:
