@@ -303,23 +303,46 @@ def main(
     logger.info(OmegaConf.to_yaml(args))
 
     # Decode all checkpoints in a folder sequentially to save the pain on running many commands
+    all_checkpoints = []
     if all:
         if not checkpoint or not checkpoint.exists():
             raise ValueError("Please provide absolute path to the checkpoints directory!")
         else:
             all_checkpoints = [
-                f for f in checkpoint.glob("model*") if 'yaml' not in str(f) and 'log' not in str(f)
+                f for f in checkpoint.glob("model*") if
+                'yaml' not in str(f) and 'log' not in str(f)
             ]
-            # Decode later checkpoints first
+            # decode later checkpoints first
             all_checkpoints.sort(key=lambda x: int(str(x).split(".")[-1]), reverse=False)
-            all_checkpoints = all_checkpoints[::freq]
+            if args.decode_steps:
+                all_checkpoints_steps = [int(str(el).split(".")[-1]) for el in all_checkpoints]
+                filtered_checkpoints = []
+                for step in args.decode_steps:
+                    try:
+                        filtered_checkpoints.append(all_checkpoints[all_checkpoints_steps.index(step)])
+                    except ValueError:
+                        logger.warning(
+                            f"Decoding step {step} specified in configuration file but corresponding checkpoint "
+                            f"not found amongst all checkpoints: __{all_checkpoints}__"
+                        )
+                all_checkpoints = filtered_checkpoints
+            else:
+                all_checkpoints = all_checkpoints[::freq]
     else:
-        if checkpoint.exists():
-            all_checkpoints = [checkpoint]
-        else:
-            raise ValueError(
-                f"No checkpoint exists at {checkpoint}. Make sure you provide absolute path!"
-            )
+        try:
+            if checkpoint.exists():
+                all_checkpoints = [checkpoint]
+        except AttributeError:
+            if not args.checkpoint:
+                raise ValueError(
+                    "Checkpoint abs path not provided and path not specified in args.decode.checkpoint!"
+                )
+            elif not Path(args.checkpoint).exists():
+                raise ValueError(
+                    f"No checkpoint exists at {args.checkpoint}. Make sure you provide absolute path!"
+                )
+            else:
+                all_checkpoints = [Path(args.checkpoint)]
 
     # Decode checkpoints sequentially
     for checkpoint in all_checkpoints:
