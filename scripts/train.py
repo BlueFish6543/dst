@@ -17,7 +17,6 @@ from torch.utils.data import (
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import (
-    Adafactor,
     AdamW,
     AutoConfig,
     GPT2LMHeadModel,
@@ -283,3 +282,11 @@ def main(
 
 if __name__ == '__main__':
     main()
+
+
+# TODO: CONFIRM_GOOGLE: MULTIPLE VALUE STRATEGY
+# TODO: CONFIRM_GOOGLE: OPTIMIZER
+# TODO: CONFIRM_GOOGLE: PADDING SIDE
+# TODO: CONFIRM_GOOGLE: SPECIAL_TOKENS_HANDLING
+# TODO: CONFIRM_GOOGLE: INPUT SEPARATORS
+# TODO: CONFIRM_GOOGLE: APPENDIX MISTAKES
