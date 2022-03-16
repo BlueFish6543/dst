@@ -32,6 +32,16 @@ DONTCARE = {
 }
 
 
+def has_alphanumeric_words(
+    word: str,
+) -> bool:
+    """Returns `True` if there are words tha contain both digits and other characters
+    or are digits"""
+    res = re.findall(r"(?:\d+[a-zA-Z]+|[a-zA-Z]+\d+)|\d+", word)
+    if res:
+        return True
+    return False
+
 def value_in_utterance(
         values: List[str],
         system_utterance: str,
@@ -60,7 +70,11 @@ def process_frame(
     # appears in the system/user utterance, or failing which, the first value
     # in the list
     current_slots = {}
+    # TODO: THIS VERY LIKELY SELECTS VALUE at index 0
     for slot, values in state["slot_values"].items():
+        assert isinstance(values, list)
+        if service in previous_slots and slot in previous_slots[service]:
+            assert not isinstance(previous_slots[service][slot], list)
         if service in previous_slots and slot in previous_slots[service] and \
                 previous_slots[service][slot] in values:
             current_slots[slot] = previous_slots[service][slot]
@@ -75,6 +89,7 @@ def process_frame(
     cat_values_mapping = turn_info[service]["cat_values_mapping"]
     for i in range(len(slot_mapping) // 2):
         slot = slot_mapping[i]
+        assert not has_alphanumeric_words(slot)
         if slot in current_slots:
             # Active
             if slot in cat_values_mapping:
@@ -110,6 +125,8 @@ def generate_description(
         turn: dict
 ) -> dict:
     services = list(sorted([frame["service"] for frame in turn["frames"]]))
+    ordered_services = [s["service_name"] for s in services]
+    assert ordered_services == sorted(ordered_services)
     result = {}
     for service in schema:
         if service["service_name"] == services[0]:
@@ -123,6 +140,7 @@ def generate_description(
             for i, slot in enumerate(service["slots"]):
                 slot_name = slot["name"]
                 slot_description = slot["description"]
+                # TODO: SEPARATOR IS = not :
                 description += f"{i}:{slot_description} "
                 slot_mapping[slot_name] = i
                 slot_mapping[i] = slot_name
@@ -131,6 +149,7 @@ def generate_description(
                     if service_name in DONTCARE and slot_name in DONTCARE[service_name] and \
                             "dontcare" not in slot["possible_values"]:
                         slot["possible_values"].append("dontcare")
+                    assert len(slot["possible_values"]) == len(set(slot["possible_values"]))
                     random.shuffle(slot["possible_values"])
                     cat_values_mapping[slot_name] = {}  # value to index
                     for s, value in zip(list(string.ascii_lowercase), slot["possible_values"]):
@@ -141,6 +160,7 @@ def generate_description(
             for i, intent in enumerate(service["intents"], 1):
                 intent_name = intent["name"]
                 intent_description = intent["description"]
+                # TODO: SEPARATOR IS = NOT :
                 description += f"i{i}:{intent_description} "
                 intent_mapping[intent_name] = f"i{i}"
                 intent_mapping[f"i{i}"] = intent_name

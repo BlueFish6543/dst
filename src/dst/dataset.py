@@ -134,6 +134,7 @@ class TrainDataset(DSTDataset):
             'input_ids': input_ids,
             'label_ids': label_ids,
             'user_utterance': user_utterance,  # useful for results analysis
+            # TODO: CHANGE THIS SO IT DEPENDS ON VARIANT
             'example_id': f"{dialogue_id}_{turn_index}",
         })
 
@@ -202,6 +203,7 @@ class TestDataset(DSTDataset):
         if len(dst_input_ids) > self.max_seq_len:
             self.over_length += 1
             dst_input_ids = dst_input_ids[-self.max_seq_len:]
+        # TODO: UPDATE FOR SGD-X TESTING
         self.examples.append({
             'input_ids': dst_input_ids,
             'example_id': f"{dialogue_id}_{turn_index}",

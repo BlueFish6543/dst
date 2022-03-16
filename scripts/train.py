@@ -1,8 +1,6 @@
-import json
 import logging
 import operator
 import pathlib
-import re
 import sys
 import time
 from pathlib import Path
@@ -151,6 +149,7 @@ def set_model(args):
     vocabulary = Vocabulary()
     tokenizer.add_special_tokens(vocabulary.special_tokens)
     model.resize_token_embeddings(len(tokenizer))
+    # TODO: CONFIGURE THIS
     model = nn.DataParallel(model)
     model.to(DEVICE)
     return config, tokenizer, model
