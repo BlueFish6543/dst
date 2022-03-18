@@ -1,34 +1,144 @@
-import argparse
+from __future__ import annotations
 import json
-import os
+import logging
+import pathlib
 import random
+import sys
+
+import click
 
 import re
 import string
 from typing import Optional, List
 
+from omegaconf import OmegaConf
+
+from src.dst.utils import infer_schema_variant_from_path, save_data, get_datetime
+
+logger = logging.getLogger(__name__)
+
 DONTCARE = {
     "Banks_1": ["recipient_account_type"],
+    "Banks_11": ["recipient_account_type"],
+    "Banks_12": ["recipient_account_type"],
+    "Banks_13": ["recipient_account_type"],
+    "Banks_14": ["recipient_account_type"],
+    "Banks_15": ["recipient_account_type"],
     "Banks_2": ["recipient_account_type"],
+    "Banks_21": ["recipient_account_type"],
+    "Banks_22": ["recipient_account_type"],
+    "Banks_23": ["recipient_account_type"],
+    "Banks_24": ["recipient_account_type"],
+    "Banks_25": ["recipient_account_type"],
     "Buses_2": ["fare_type"],
+    "Buses_21": ["fare_type"],
+    "Buses_22": ["fare_type"],
+    "Buses_23": ["fare_type"],
+    "Buses_24": ["fare_type"],
+    "Buses_25": ["fare_type"],
     "Buses_3": ["category"],
+    "Buses_31": ["category"],
+    "Buses_32": ["category"],
+    "Buses_33": ["category"],
+    "Buses_34": ["category"],
+    "Buses_35": ["category"],
     "Flights_1": ["airlines", "seating_class"],
+    "Flights_11": ["airlines", "seating_class"],
+    "Flights_12": ["airlines", "seating_class"],
+    "Flights_13": ["airlines", "seating_class"],
+    "Flights_14": ["airlines", "seating_class"],
+    "Flights_15": ["airlines", "seating_class"],
     "Flights_2": ["airlines", "seating_class"],
+    "Flights_21": ["airlines", "seating_class"],
+    "Flights_22": ["airlines", "seating_class"],
+    "Flights_23": ["airlines", "seating_class"],
+    "Flights_24": ["airlines", "seating_class"],
+    "Flights_25": ["airlines", "seating_class"],
     "Flights_3": ["airlines", "flight_class"],
+    "Flights_31": ["airlines", "flight_class"],
+    "Flights_32": ["airlines", "flight_class"],
+    "Flights_33": ["airlines", "flight_class"],
+    "Flights_34": ["airlines", "flight_class"],
+    "Flights_35": ["airlines", "flight_class"],
     "Flights_4": ["airlines", "seating_class"],
+    "Flights_41": ["airlines", "seating_class"],
+    "Flights_42": ["airlines", "seating_class"],
+    "Flights_43": ["airlines", "seating_class"],
+    "Flights_44": ["airlines", "seating_class"],
+    "Flights_45": ["airlines", "seating_class"],
     "Media_2": ["subtitle_language"],
     "Media_3": ["subtitle_language"],
+    "Media_31": ["subtitle_language"],
+    "Media_32": ["subtitle_language"],
+    "Media_33": ["subtitle_language"],
+    "Media_34": ["subtitle_language"],
+    "Media_35": ["subtitle_language"],
     "Movies_1": ["show_type"],
+    "Movies_11": ["show_type"],
+    "Movies_12": ["show_type"],
+    "Movies_13": ["show_type"],
+    "Movies_14": ["show_type"],
+    "Movies_15": ["show_type"],
     "Music_1": ["playback_device"],
+    "Music_11": ["playback_device"],
+    "Music_12": ["playback_device"],
+    "Music_13": ["playback_device"],
+    "Music_14": ["playback_device"],
+    "Music_15": ["playback_device"],
     "Music_2": ["playback_device"],
+    "Music_21": ["playback_device"],
+    "Music_22": ["playback_device"],
+    "Music_23": ["playback_device"],
+    "Music_24": ["playback_device"],
+    "Music_25": ["playback_device"],
     "Music_3": ["device"],
+    "Music_31": ["device"],
+    "Music_32": ["device"],
+    "Music_33": ["device"],
+    "Music_34": ["device"],
+    "Music_35": ["device"],
     "RentalCars_1": ["type"],
+    "RentalCars_11": ["type"],
+    "RentalCars_12": ["type"],
+    "RentalCars_13": ["type"],
+    "RentalCars_14": ["type"],
+    "RentalCars_15": ["type"],
     "RentalCars_2": ["car_type"],
+    "RentalCars_21": ["car_type"],
+    "RentalCars_22": ["car_type"],
+    "RentalCars_23": ["car_type"],
+    "RentalCars_24": ["car_type"],
+    "RentalCars_25": ["car_type"],
     "RentalCars_3": ["car_type"],
+    "RentalCars_31": ["car_type"],
+    "RentalCars_32": ["car_type"],
+    "RentalCars_33": ["car_type"],
+    "RentalCars_34": ["car_type"],
+    "RentalCars_35": ["car_type"],
     "Restaurants_1": ["price_range"],
+    "Restaurants_11": ["price_range"],
+    "Restaurants_12": ["price_range"],
+    "Restaurants_13": ["price_range"],
+    "Restaurants_14": ["price_range"],
+    "Restaurants_15": ["price_range"],
     "Restaurants_2": ["price_range"],
+    "Restaurants_21": ["price_range"],
+    "Restaurants_22": ["price_range"],
+    "Restaurants_23": ["price_range"],
+    "Restaurants_24": ["price_range"],
+    "Restaurants_25": ["price_range"],
     "Trains_1": ["class"],
-    "Travel_1": ["category"]
+    "Trains_11": ["class"],
+    "Trains_12": ["class"],
+    "Trains_13": ["class"],
+    "Trains_14": ["class"],
+    "Trains_15": ["class"],
+    "Travel_1": ["category"],
+    "Travel_11": ["category"],
+    "Travel_12": ["category"],
+    "Travel_13": ["category"],
+    "Travel_14": ["category"],
+    "Travel_15": ["category"],
 }
 
 
@@ -51,7 +161,7 @@ def value_in_utterance(
     for value in values:
         if value in system_utterance or value in user_utterance:
             return value
-    return None
+    return
 
 
 def process_frame(
@@ -125,7 +235,7 @@ def generate_description(
         turn: dict
 ) -> dict:
     services = list(sorted([frame["service"] for frame in turn["frames"]]))
-    ordered_services = [s["service_name"] for s in services]
+    ordered_services = [s["service_name"] for s in schema]
     assert ordered_services == sorted(ordered_services)
     result = {}
     for service in schema:
@@ -187,19 +297,16 @@ def process_file(
         result[dialogue_id] = []
         system_utterance = ""
         previous_slots = {}
-
         for turn in dialogue["turns"]:
             if turn["speaker"] == "SYSTEM":
                 system_utterance = turn["utterance"]
                 # We don't need to do anything else
-
             elif turn["speaker"] == "USER":
                 turn_info = generate_description(schema, turn)
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
                     # Each frame represents one service
                     process_frame(frame, turn_info, previous_slots, system_utterance, user_utterance)
-
                 result[dialogue_id].append({
                     "frames": turn_info,
                     "system_utterance": system_utterance,
@@ -210,28 +317,76 @@ def process_file(
                 raise ValueError("Unknown speaker.")
     return result
 
+@click.command()
+@click.option("--quiet", "log_level", flag_value=logging.WARNING, default=True)
+@click.option("-v", "--verbose", "log_level", flag_value=logging.INFO)
+@click.option("-vv", "--very-verbose", "log_level", flag_value=logging.DEBUG)
+@click.option(
+    "-c",
+    "--config",
+    "cfg_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="path to config file",
+)
+@click.option(
+    "-d",
+    "--data_paths",
+    "data_paths",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to one or more raw SGD data directories.",
+    multiple=True,
+)
+@click.option(
+    "-o",
+    "--output_path",
+    "output_path",
+    required=True,
+    type=click.Path(exists=False),
+    help="Directory where processed data is output.",
+)
+@click.option('--train', 'split', flag_value='train', default=True)
+@click.option('--dev', 'split', flag_value='dev')
+@click.option('--test', 'split', flag_value='test')
+def main(
+        cfg_path: pathlib.Path,
+        log_level: int,
+        data_paths: tuple[str],
+        output_path: pathlib.Path,
+        split: str,
+):
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--dir', help='Directory containing `dialogues_XXX.json` files', required=True)
-    parser.add_argument('-o', '--out', help='Output file location and name', required=True)
-    args = parser.parse_args()
-
-    with open(os.path.join(args.dir, "schema.json")) as f:
-        schema = json.load(f)
-    pattern = re.compile(r"dialogues_[0-9]+\.json")
-    result = {}
-    for file in os.listdir(args.dir):
-        if pattern.match(file):
-            with open(os.path.join(args.dir, file), "r") as f:
-                data = json.load(f)
-            result.update(process_file(schema, data))
-
-    out = {
-        "data": result
-    }
-    with open(args.out, "w") as f:
-        json.dump(out, f, indent=4)
+    logging.basicConfig(
+        stream=sys.stdout,
+        level=log_level,
+        datefmt="%Y-%m-%d %H:%M",
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    config = OmegaConf.load(cfg_path)
+    config.metadata.date = get_datetime()
+    config.metadata.raw_data_path = [p for p in data_paths]
+    config.metadata.split = split
+    config.metadata.output_path = output_path
+    output_path = pathlib.Path(output_path)
+    data_paths = [pathlib.Path(p) for p in data_paths]
+    for shard_path in data_paths:
+        logger.info(
+            f"Preprocessing shard {shard_path}"
+        )
+        this_shard_data_dir = shard_path.joinpath(split)
+        schema_variant = infer_schema_variant_from_path(str(this_shard_data_dir))
+        config.metadata.schema_variant = schema_variant
+        with open(this_shard_data_dir.joinpath("schema.json"), 'r') as f:
+            schema = json.load(f)
+        pattern = re.compile(r"dialogues_[0-9]+\.json")
+        result = {}
+        for file in this_shard_data_dir.iterdir():
+            if pattern.match(file.name):
+                with open(file, "r") as f:
+                    data = json.load(f)
+                result.update(process_file(schema, data))
+        save_data(result, output_path.joinpath(schema_variant, split), metadata=config)
 
 
 if __name__ == '__main__':
