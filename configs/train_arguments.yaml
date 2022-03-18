@@ -24,6 +24,7 @@ train:
   checkpoint: ''
   verbose:
     disable_display: false
+  data_parallel: False
 
 dev:
   model_name_or_path: 't5-base'
