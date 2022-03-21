@@ -19,7 +19,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGenerat
 logger = logging.getLogger(__name__)
 
 _EXPECTED_SCHEMA_VARIANTS = ['v1', 'v2', 'v3', 'v4', 'v5']
-_EXPECTED_SPLITS = ['train', 'test', 'dev']
+_EXPECTED_SPLITS = ['train', 'test', 'dev', 'dev_small']
 
 def set_seed(args):
     # For reproduction
@@ -41,7 +41,7 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     save_path = f"{ckpt_path}/model.{step}"
     logger.info(f"Save model in {save_path}!")
     tokenizer.save_pretrained(save_path)
-    model.module.save_pretrained(save_path)
+    model.save_pretrained(save_path)
     OmegaConf.save(args, f"{ckpt_path}/model_config.yaml")
     state_dict = {'optimizer_state_dict': optimizer.state_dict()}
     if scheduler is not None:
@@ -49,7 +49,7 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     torch.save(state_dict, os.path.join(save_path, "checkpoint.pth"))
 
 
-def load_model(args: DictConfig, device: torch.device, data_parallel: bool = False):
+def load_model(args: DictConfig, device: Union[torch.device, str], data_parallel: bool = False):
     ckpt_path = args.checkpoint
     logger.info(f"Load model, tokenizer from {ckpt_path}")
     if 'gpt2' in args.model_name_or_path.lower():
@@ -63,7 +63,7 @@ def load_model(args: DictConfig, device: torch.device, data_parallel: bool = Fal
     if data_parallel:
         model = nn.DataParallel(model)
     model.to(device)
-    return model.module.config, tokenizer, model
+    return model.config, tokenizer, model
 
 
 def load_optimizer_scheduler(ckpt_path, optimizer, scheduler):
@@ -152,16 +152,8 @@ class ServiceSchema(object):
         return self._slots
 
     @property
-    def slot_descriptions(self):
-        return self._slot_descriptions
-
-    @property
     def intents(self):
         return self._intents
-
-    @property
-    def intent_descriptions(self):
-        return self._intent_descriptions
 
     @property
     def categorical_slots(self):
@@ -214,12 +206,8 @@ class Schema(object):
             json.dump(self._schemas, f, indent=4)
 
 
-def load_schema(data_paths: list[str]) -> Union[Schema, None]:
-    for pth in data_paths:
-        schema_variant = infer_schema_variant_from_path(pth)
-        if schema_variant == 'original':
-            schema_path = pathlib.Path(pth).parent.joinpath("schema.json")
-            return Schema(schema_path)
+def load_schema(data_path: Path) -> Schema:
+    return Schema(data_path)
 
 
 def infer_schema_variant_from_path(path: str) -> str:
@@ -249,6 +237,18 @@ def infer_split_name_from_path(path: str) -> str:
         split = p.parent.parent.name
     assert split in _EXPECTED_SPLITS
     return split
+
+
+def infer_data_version_from_path(path: str) -> str:
+    match = re.search(r"\bversion_\d+\b", path) # noqa
+    if match is not None:
+        version = path[match.start():match.end()]
+    else:
+        logger.warning(
+            f"Could not detect data version in path {path}"
+        )
+        version = ''
+    return version
 
 
 def save_data(data: Union[dict, list], path: Union[Path, str], metadata : Optional[DictConfig] = None):
