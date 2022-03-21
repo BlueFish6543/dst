@@ -17,8 +17,13 @@ from tqdm import tqdm
 from src.dst.dataset import (
     TestDataset
 )
-from src.dst.utils import load_model, set_seed
-
+from src.dst.utils import (
+    load_model,
+    set_seed,
+    infer_schema_variant_from_path,
+    load_schema,
+    infer_data_version_from_path, get_datetime,
+)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
 
@@ -106,7 +111,7 @@ def decode(args, batch, model, tokenizer):
     assert batch_size == 1
     try:
         if args.generate_api == 'huggingface':
-            output = model.module.generate(
+            output = model.generate(
                 input_ids.to(DEVICE),
                 max_length=(ctx_len + args.max_len),
                 do_sample=False,
@@ -135,7 +140,8 @@ def decode(args, batch, model, tokenizer):
 
 
 def test(args, tokenizer, model):
-    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size)
+    train_schema = load_schema(args.orig_train_schema_path)
+    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size, train_schema)
     sampler = SequentialSampler(dataset)
     test_gen_dataloader = DataLoader(
         dataset,
@@ -145,10 +151,15 @@ def test(args, tokenizer, model):
     )
     model.eval()
     collector = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    description = f'Decoding {len(dataset)} examples from split {dataset.split}. ' \
+                  f'Schema variants: {dataset.schema_variants}'
     with torch.no_grad():
-        iterator = enumerate(tqdm(test_gen_dataloader, desc="Test", disable=args.verbose.disable_display))
+        iterator = enumerate(
+            tqdm(test_gen_dataloader, desc=description, disable=args.verbose.disable_display)
+        )
         for step, batch in iterator:
-            dialogue_id, turn_idx = batch['example_id'][0].rsplit("_", 1)
+            schema_variant, dial_turn = batch['example_id'][0].split("_", 1)
+            dialogue_id, turn_idx = dial_turn.rsplit("_", 1)
             bs_pred_str = decode(args, batch, model, tokenizer)
             usr_utterance = batch['user_utterance'][0]
             service = batch['service'][0]
@@ -234,7 +245,7 @@ def decode_checkpoint(
     "hyp_dir",
     type=click.Path(path_type=Path),
     help="Dir where hypothesis files are to be saved. "
-         "Auto-suffixed with args.decode.experiment_name model checkpoint binary name automatically.",
+         "Auto-suffixed with args.decode.experiment_name model checkpoint binary name.",
 )
 @click.option(
     '--all',
@@ -256,6 +267,17 @@ def decode_checkpoint(
     default=1,
     help="Subsample the checkpoints to speed up task-oriented evaluation as training progresses."
 )
+@click.option(
+    "-s",
+    "--orig_train_schema_path",
+    "orig_train_schema_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Absolute original train schema path. Used to determine seen/unseen examples",
+)
+@click.option('--dev_small', 'split', flag_value='dev_small', default=True)
+@click.option('--dev', 'split', flag_value='dev')
+@click.option('--test', 'split', flag_value='test')
 def main(
         args_path: pathlib.Path,
         test_path: pathlib.Path,
@@ -265,21 +287,40 @@ def main(
         all: bool,
         override: bool,
         freq: int,
+        orig_train_schema_path: pathlib.Path,
+        split: str,
 ):
     args = OmegaConf.load(args_path)
     set_seed(args.reproduce)
     args = args.decode
+    args.orig_train_schema_path = str(orig_train_schema_path)
     args.override = override
     experiment = args.experiment_name
+    schema_variant_identifier = infer_schema_variant_from_path(str(test_path))
+    data_version = infer_data_version_from_path(str(test_path))
+    test_data_version = -1
+    if data_version:
+        test_data_version = int(data_version.split("_")[1])
+
     try:
-        hyp_path = hyp_dir.joinpath(experiment)
+        hyp_path = hyp_dir.joinpath(
+            experiment,
+            schema_variant_identifier,
+            split,
+            data_version,
+        )
     # Retrieve path from args
     except AttributeError:
         if not args.hyp_dir:
             raise ValueError(
                 "You must provide a path for hypothesis to be saved via args.decode.hyp_path or -hyp/--hyp-path."
             )
-        hyp_path = Path(args.hyp_dir).joinpath(experiment)
+        hyp_path = Path(args.hyp_dir).joinpath(
+            experiment,
+            schema_variant_identifier,
+            split,
+            data_version,
+        )
 
     if not hyp_path.exists():
         hyp_path.mkdir(exist_ok=True, parents=True)
@@ -299,9 +340,9 @@ def main(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     logger.setLevel(log_level)
-    args.dst_test_path = str(test_path)
+    # for compatibility - TestDataset inherits DSTDataset which operates on shards
+    args.dst_test_path = [str(test_path)]
     logger.info(OmegaConf.to_yaml(args))
-
     # Decode all checkpoints in a folder sequentially to save the pain on running many commands
     all_checkpoints = []
     if all:
@@ -343,14 +384,23 @@ def main(
                 )
             else:
                 all_checkpoints = [Path(args.checkpoint)]
-
+    logger.info(f"Decoding {len(all_checkpoints)} checkpoints")
     # Decode checkpoints sequentially
-    for checkpoint in all_checkpoints:
+    for ckpt_number, checkpoint in enumerate(all_checkpoints):
+        logger.info(f"Decoding checkpoint {ckpt_number}...")
         model_config = OmegaConf.load(checkpoint.parent.joinpath("model_config.yaml"))
+        config_data_version = model_config.data.version
+        if config_data_version != test_data_version:
+            logger.error(
+                f"Data version: {test_data_version}. Checkpoint_version: {config_data_version}."
+                f"Decoding aborted"
+            )
+            raise ValueError("Incorrect data version!")
         belief_states = decode_checkpoint(args, checkpoint, hyp_path)
         if belief_states:
             decode_config = OmegaConf.create()
             decode_config.decode = args
+            decode_config.date = get_datetime()
             OmegaConf.save(
                 OmegaConf.merge(decode_config, model_config),
                 f=hyp_path.joinpath(checkpoint.name, "experiment_config.yaml")
