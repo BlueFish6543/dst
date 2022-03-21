@@ -10,22 +10,22 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J decode
+#SBATCH -J sgd_x_decoding
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
 #SBATCH -A BYRNE-SL2-GPU
 #! How many whole nodes should be allocated?
-#SBATCH --nodes=1
+#SBATCH --nodes=3
 #! How many (MPI) tasks will there be in total?
 #! Note probably this should not exceed the total number of GPUs in use.
-#SBATCH --ntasks=4
+#SBATCH --ntasks=12
 #! Specify the number of GPUs per node (between 1 and 4; must be 4 if nodes>1).
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
 #SBATCH --gres=gpu:4
 #! How much wallclock time will be required?
-#SBATCH --time=12:00:00
+#SBATCH --time=4:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
-#SBATCH --array=0-7
+#SBATCH --array=0-11
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
@@ -56,19 +56,25 @@ module load rhel8/default-amp              # REQUIRED - loads the basic environm
 module load python/3.8
 module load miniconda/3
 eval "$(conda shell.bash hook)"
-conda activate /home/zxc22/.conda/envs/dst
+conda activate /home/ac2123/anaconda3/envs/dst
 which python
 
-STEPARRAY=(400000 440000 480000 520000 560000 600000 640000 680000)
-STEP=${STEPARRAY[$SLURM_ARRAY_TASK_ID]}
+SHARDS=(original v1 v2 v3 v4 v5 v6)
+SGD_SHARD=${SHARDS[$SLURM_ARRAY_TASK_ID]}
 
 #! Full path to application executable:
 application="python -u -m scripts.decode"
 
+
+
 #! Run options for the application:
-options="-t data/preprocessed/sgd/d3st/test.json \
--a configs/decode_arguments.yaml \
--c models/d3st-1/model.${STEP} -hyp decode -vv"
+options_1="-t /home/ac2123/rds/hpc-work/d3st/data/preprocessed/$SGD_SHARD/test/version_1/data.json \
+-a /home/ac2123/rds/hpc-work/d3st/configs/decode_arguments.yaml \
+-c /home/ac2123/rds/hpc-work/d3st/models/pegasus_schema_aug/model.792000 -hyp /home/ac2123/rds/hpc-work/d3st/hyps -vvv"
+
+options_2="-t /home/ac2123/rds/hpc-work/zhe_dst/data/preprocessed/$SGD_SHARD/test/version_1/data.json \
+-a /home/ac2123/rds/hpc-work/zhe_dst/configs/decode_arguments.yaml \
+-c /home/ac2123/rds/hpc-work/zhe_dst/models/d3st-v1_1/model.800000 -hyp /home/ac2123/rds/hpc-work/d3st/hyps -vvv"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
@@ -83,7 +89,8 @@ np=$[${numnodes}*${mpi_tasks_per_node}]
 
 #! Choose this for a pure shared-memory OpenMP parallel program on a single node:
 #! (OMP_NUM_THREADS threads will be created):
-CMD="$application $options"
+FIRST_MODEL="$application $options_1"
+SECOND_MODEL="$application $options_2"
 
 #! Choose this for a MPI code using OpenMPI:
 #CMD="mpirun -npernode $mpi_tasks_per_node -np $np $application $options"
@@ -113,6 +120,7 @@ fi
 
 echo -e "\nnumtasks=$numtasks, numnodes=$numnodes, mpi_tasks_per_node=$mpi_tasks_per_node (OMP_NUM_THREADS=$OMP_NUM_THREADS)"
 
-echo -e "\nExecuting command:\n==================\n$CMD\n"
-
-eval $CMD
+echo -e "\nExecuting command:\n==================\n$FIRST_MODEL\n"
+echo -e "\nExecuting command:\n==================\n$SECOND_MODELL\n"
+eval $FIRST_MODEL
+eval $SECOND_MODEL
