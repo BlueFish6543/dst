@@ -4,9 +4,9 @@ data:
   preprocessing: {}
 
 train:
-  model_name_or_path: 't5-base'
+  model_name_or_path: 'google/t5-v1_1-base'
   max_seq_len: 1024 # maximum sequence length
-  epochs: 4 # maximum number of epochs
+  epochs: 9 # maximum number of epochs
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
   batch_size: 4
   gradient_accumulation_steps: 8 # gradients applied every this many batches to the output
@@ -14,25 +14,25 @@ train:
   use_scheduler: false
   warmup_steps: 0
   learning_rate: 1e-4
-  adam_eps: 1e-12
+  adam_eps: 1e-7
   fp16: false # use float16 in training
   eps: 1e-12
   # Path where checkpoints are *saved*
   checkpoint_dir: 'models'
   # If populated, the checkpoints are saved under checkpoint_dir/experiment_name
-  experiment_name: 'd3st-1'
+  experiment_name: 'pegasus_schema_aug'
   # Populate if the training is restarted from checkpoint
   checkpoint: ''
   verbose:
     disable_display: false
-  data_parallel: False
+  data_parallel: false
 
 dev:
-  model_name_or_path: 't5-base'
+  model_name_or_path: 'google/t5-v1_1-base'
   max_seq_len: 1024 # maximum sequence length
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
-  eval_interval: 40000 # number of examples after which the model is evaluated
-  batch_size: 16
+  eval_interval: 66000 # number of examples after which the model is evaluated
+  batch_size: 8
   verbose:
     disable_display: false
 
