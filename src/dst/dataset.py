@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import collections
 import json
 import logging
+import random
 from dataclasses import dataclass, field
 from typing import Union
 
 import torch
+from omegaconf import DictConfig
 from tqdm import tqdm
+
+from src.dst.utils import infer_schema_variant_from_path, infer_split_name_from_path, Schema
 
 logger = logging.getLogger(__name__)
 
@@ -36,80 +41,119 @@ class Vocabulary:
             self.vocabulary_update = True
 
 
+def pad(sentences, pad_id, side="right"):
+    max_len = max((map(len, sentences)))
+    attention_mask = []
+    sentences_pad = []
+    for sent in sentences:
+        pad_len = max_len - len(sent)
+        if side == "right":
+            sentences_pad.append(sent + [pad_id] * pad_len)
+            attention_mask.append([1] * len(sent) + [0] * pad_len)
+        elif side == "left":
+            sentences_pad.append([pad_id] * pad_len + sent)
+            attention_mask.append([0] * pad_len + [1] * len(sent))
+        else:
+            raise ValueError("Unknown padding side.")
+    return sentences_pad, attention_mask
+
+
 class DSTDataset(torch.utils.data.Dataset):
-    def __init__(self, args, tokenizer, filename, data_size):
+    def __init__(self, args: DictConfig, tokenizer, data_paths: list[str], data_size: int, train_schema: Schema):
         self.args = args
         self.data_size = data_size
         self.tokenizer = tokenizer
-        self.filename = filename
+        self.data_paths = data_paths
         self.pad_id = tokenizer.pad_token_id  # pad to max example length
         self.eos_id = tokenizer.eos_token_id
         self.ignore_token_id = -100
         self.max_seq_len = args.max_seq_len
-        with open(filename, 'r') as f:
-            dataset = json.load(f)
-            self.data = dataset["data"]
+        self.examples = []
+        self.seen_services = set(train_schema.services)  # type: set[str]
+        inferred_splits = {infer_split_name_from_path(pth) for pth in data_paths}
+        assert len(inferred_splits) == 1, f"Attempting to load data from multiple splits: _{inferred_splits}_"
+        self.split = list(inferred_splits)[0]
+        inferred_schema_variants = [infer_schema_variant_from_path(pth) for pth in data_paths]
+        if len(inferred_schema_variants) != len(set(inferred_schema_variants)):
+            duplicates = collections.Counter(inferred_schema_variants)
+            raise AssertionError(
+                "When loading data, encountered multiple shards from same sgd-x variant: \n"
+                f"{duplicates.most_common()}"
+            )
+        self.schema_variants = inferred_schema_variants
         self._create_examples()
 
-    @staticmethod
-    def _pad(sentences, pad_id, side="right"):
-        max_len = max((map(len, sentences)))
-        attention_mask = []
-        sentences_pad = []
-        for sent in sentences:
-            pad_len = max_len - len(sent)
-            if side == "right":
-                sentences_pad.append(sent + [pad_id] * pad_len)
-                attention_mask.append([1] * len(sent) + [0] * pad_len)
-            elif side == "left":
-                sentences_pad.append([pad_id] * pad_len + sent)
-                attention_mask.append([0] * pad_len + [1] * len(sent))
-            else:
-                raise ValueError("Unknown padding side.")
-        return sentences_pad, attention_mask
 
-    def __len__(self):  # required
+    def __len__(self):
         return len(self.examples)
 
-    def __getitem__(self, index):  # required
+    def __getitem__(self, index):
         return self.examples[index]
 
 
+    def _create_examples(self):
+        raise NotImplementedError
+
+
 class TrainDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size):
+    def __init__(self, args: DictConfig, tokenizer, data_paths: list[str], data_size: int, train_schema: Schema):
         self.over_length = 0
-        super().__init__(args, tokenizer, filename, data_size)
+        super().__init__(args, tokenizer, data_paths, data_size, train_schema)
 
     def _create_examples(self):
-        self.examples = []
-        for dialogue_id, dialogue in tqdm(
-                self.data.items(),
-                desc=f"Loading {self.filename}\n",
-                disable=self.args.verbose.disable_display
-        ):
-            if self.data_size != -1 and len(self.examples) >= self.data_size:
-                break
-            context = ""
-            for turn_index, turn in enumerate(dialogue):
-                user_utterance = turn['user_utterance']
-                system_utterance = turn['system_utterance']
-                if not system_utterance:
-                    utterance = f"[user] {user_utterance} "
-                else:
-                    utterance = f"[system] {system_utterance} [user] {user_utterance} "
-                context += utterance
 
-                frames = turn['frames']
-                for service in frames:
-                    model_input = frames[service]["description"] + " " + context
-                    context_ids = self.tokenizer(model_input)['input_ids']
-                    target_ids = self.tokenizer(frames[service]["expected_output"])['input_ids']
-                    self.create_ids(dialogue_id, turn_index, context_ids, target_ids, user_utterance)
+        for shard_path in self.data_paths:
+            logger.info(f"Loading data from shard {shard_path}")
+            schema_variant = infer_schema_variant_from_path(shard_path)
+            with open(shard_path, 'r') as f:
+                this_shard_data = json.load(f)
+            shuffled_keys = list(this_shard_data.keys())
+            random.shuffle(shuffled_keys)
+            for i, dialogue_id in enumerate(shuffled_keys):
+                dialogue = this_shard_data[dialogue_id]
+                if self.data_size != -1 and i > self.data_size:
+                    break
+                context = ""
+                for turn_index, turn in enumerate(dialogue):
+                    user_utterance = turn['user_utterance']
+                    system_utterance = turn['system_utterance']
+                    if not system_utterance:
+                        utterance = f"[user] {user_utterance} "
+                    else:
+                        utterance = f"[system] {system_utterance} [user] {user_utterance} "
+                    context += utterance
+                    frames = turn['frames']
+                    for service in frames:
+                        model_input = frames[service]["description"] + " " + context
+                        context_ids = self.tokenizer(model_input)['input_ids']
+                        target_ids = self.tokenizer(frames[service]["expected_output"])['input_ids']
+                        self.create_ids(
+                            context_ids,
+                            target_ids,
+                            user_utterance,
+                            schema_variant,
+                            service,
+                            dialogue_id,
+                            turn_index
+                        )
 
-        logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
-        logger.info(f"Number of over-length examples: {self.filename}: {self.over_length} examples")
+        logger.info(f"Data statistics: {self.data_paths}: {len(self.examples)} examples")
+        logger.info(f"Number of over-length examples: {self.data_paths}: {self.over_length} examples")
+        random.shuffle(self.examples)
+        if self.data_size != -1:
+            self.examples = self.examples[:self.data_size]
 
-    def create_ids(self, dialogue_id, turn_index, context_ids, target_ids, user_utterance):
+
+    def create_ids(
+            self,
+            context_ids: list[int],
+            target_ids: list[int],
+            user_utterance: str,
+            schema_variant_identifier: str,
+            service: str,
+            dialogue_id: str,
+            turn_index: int
+    ):
         target_len = len(target_ids)
         if 'gpt2' in self.args.model_name_or_path.lower():
             # context <BOS> target <EOS>
@@ -130,45 +174,56 @@ class TrainDataset(DSTDataset):
             input_ids = input_ids[-self.max_seq_len:]
             label_ids = label_ids[-self.max_seq_len:]
         assert len(input_ids) <= self.max_seq_len
+        seen_flag = 1
+        if self.split != 'train':
+            seen_flag = 1 if service in self.seen_services else 0
         self.examples.append({
             'input_ids': input_ids,
             'label_ids': label_ids,
+            'seen': seen_flag,
             'user_utterance': user_utterance,  # useful for results analysis
-            # TODO: CHANGE THIS SO IT DEPENDS ON VARIANT
-            'example_id': f"{dialogue_id}_{turn_index}",
+            'example_id': f"{schema_variant_identifier}_{dialogue_id}_{turn_index}",
         })
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
-        input_ids, attention_mask = self._pad(input_ids, self.pad_id)
+        input_ids, attention_mask = pad(input_ids, self.pad_id)
         input_ids = torch.tensor(input_ids).long()
         attention_mask = torch.tensor(attention_mask).long()
         label_ids = [example['label_ids'] for example in batch]
-        label_ids, _ = self._pad(label_ids, self.ignore_token_id)
+        label_ids, _ = pad(label_ids, self.ignore_token_id)
         label_ids = torch.tensor(label_ids).long()
         user_utterances = [example['user_utterance'] for example in batch]
+        seen_flag = [example['seen'] for example in batch]
+        seen_flag = torch.tensor(seen_flag, dtype=torch.bool)
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
             'label_ids': label_ids,
-            'user_utterance': user_utterances
+            'user_utterance': user_utterances,
+            'seen': seen_flag,
         }
 
 
 class TestDataset(DSTDataset):
-    def __init__(self, args, tokenizer, filename, data_size):
+    def __init__(self, args: DictConfig, tokenizer, data_paths: list[str], data_size: int, train_schema: Schema):
         self.to_decode: set[str] = set(args.decode_only)
         self.over_length = 0
-        super().__init__(args, tokenizer, filename, data_size)
+        super().__init__(args, tokenizer, data_paths, data_size, train_schema)
+
 
     def _create_examples(self):
+        assert len(self.data_paths) == 1, "Only one schema variant can be decoded at one time"
         self.examples = []
-        over_length = 0
+        with open(self.data_paths[0], 'r') as f:
+            data = json.load(f)
+        schema_variant_identifier = infer_schema_variant_from_path(self.data_paths[0])
         for dialogue_id, dialogue in tqdm(
-                self.data.items(),
-                desc=f"Loading {self.filename}",
+                data.items(),
+                desc=f"Loading {self.data_paths[0]}",
                 disable=self.args.verbose.disable_display
         ):
+
             if self.to_decode and dialogue_id not in self.to_decode:
                 continue
             if self.data_size != -1 and len(self.examples) >= self.data_size:
@@ -182,17 +237,31 @@ class TestDataset(DSTDataset):
                 else:
                     utterance = f"[system] {system_utterance} [user] {user_utterance} "
                 context += utterance
-
                 frames = turn['frames']
                 for service in frames:
                     model_input = frames[service]["description"] + " " + context
                     context_ids = self.tokenizer(model_input)['input_ids']
-                    self.create_ids(dialogue_id, turn_index, context_ids, user_utterance, service)
+                    self.create_ids(
+                        context_ids,
+                        user_utterance,
+                        schema_variant_identifier,
+                        service,
+                        dialogue_id,
+                        turn_index
+                    )
 
-        logger.info(f"Data statistics: {self.filename}: {len(self.examples)} examples")
-        logger.info(f"Number of over-length examples: {self.filename}: {self.over_length} examples")
+        logger.info(f"Data statistics: {self.data_paths}: {len(self.examples)} examples")
+        logger.info(f"Number of over-length examples: {self.data_paths}: {self.over_length} examples")
 
-    def create_ids(self, dialogue_id, turn_index, context_ids, user_utterance, service):
+    def create_ids(
+            self,
+            context_ids: list[int],
+            user_utterance: str,
+            schema_variant_identifier: str,
+            service: str,
+            dialogue_id: str,
+            turn_index: int
+    ):
         if 'gpt2' in self.args.model_name_or_path.lower():
             # context <BOS> target <EOS>
             dst_input_ids = context_ids + [self.tokenizer.bos_token_id]
@@ -203,28 +272,31 @@ class TestDataset(DSTDataset):
         if len(dst_input_ids) > self.max_seq_len:
             self.over_length += 1
             dst_input_ids = dst_input_ids[-self.max_seq_len:]
-        # TODO: UPDATE FOR SGD-X TESTING
         self.examples.append({
             'input_ids': dst_input_ids,
-            'example_id': f"{dialogue_id}_{turn_index}",
+            'example_id': f"{schema_variant_identifier}_{dialogue_id}_{turn_index}",
             'user_utterance': user_utterance,
-            'service': service
+            'service': service,
+            'seen': 1 if service in self.seen_services else 0
         })
 
     def collate_fn(self, batch):
         input_ids = [example['input_ids'] for example in batch]
-        input_ids, attention_mask = self._pad(input_ids, self.pad_id)
+        input_ids, attention_mask = pad(input_ids, self.pad_id)
         input_ids = torch.tensor(input_ids).long()
         attention_mask = torch.tensor(attention_mask).long()
         example_id = [example['example_id'] for example in batch]
         user_utterances = [example['user_utterance'] for example in batch]
         services = [example['service'] for example in batch]
+        seen_flag = [example['seen'] for example in batch]
+        seen_flag = torch.tensor(seen_flag, dtype=torch.bool)
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
             'example_id': example_id,
             'user_utterance': user_utterances,
-            'service': services
+            'service': services,
+            'seen': seen_flag,
         }
 
 
