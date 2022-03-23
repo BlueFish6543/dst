@@ -116,24 +116,22 @@ def compute_dev_lm_loss(args, dataloader, model) -> dict[str, float]:
     }
 
 
-def train(args, tokenizer, model, train_dataloader, dev_dataloader,
-          optimizer, scheduler, initial_step: int  = 0):
+def train(args, tokenizer, model, train_dataloader, dev_dataloader, optimizer, scheduler, initial_step: int  = 0):
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
-    log_dir = Path().resolve().joinpath("runs/{}".format(train_args.experiment_name))
+    log_dir = Path().resolve().joinpath(f"runs/{train_args.experiment_name}")
     writer = SummaryWriter(
         log_dir=str(log_dir),
     )
     logger.info(f"Tensorboard logs saved at: {log_dir}")
-
     eval_step = dev_args.eval_interval // train_args.batch_size
-    gstep = initial_step // train_args.batch_size
+    global_step = initial_step // train_args.batch_size
     dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
     for subset, value in dev_losses.items():
-        logger.info(f"Epoch: {gstep} | {subset} loss: {value:.8f}")
-        if gstep > 0:
+        logger.info(f"Epoch: {global_step} | {subset} loss: {value:.8f}")
+        if global_step > 0:
             # We can't actually read the plot if we log that value
-            writer.add_scalar(f'Loss/{subset}', value, global_step=gstep * train_args.batch_size)
+            writer.add_scalar(f'Loss/{subset}', value, global_step=global_step * train_args.batch_size)
     logger.info('Start training!')
     for epoch in range(train_args.epochs):
         # Initialise for each epoch
@@ -142,7 +140,11 @@ def train(args, tokenizer, model, train_dataloader, dev_dataloader,
         model.train()
         model.zero_grad()
 
-        iterator = enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch}", disable=train_args.verbose.disable_display))
+        iterator = enumerate(
+            tqdm(
+                train_dataloader,
+                desc=f"Epoch {epoch}", disable=train_args.verbose.disable_display)
+        )
         local_step = 0
         for local_step, batch in iterator:
             output = model(
@@ -152,32 +154,58 @@ def train(args, tokenizer, model, train_dataloader, dev_dataloader,
             )
             loss = output.loss.mean()
             loss_disp += output.loss.mean().item()
-            gstep += 1
+            global_step += 1
             # Update model
             if loss.item() != 0:
                 loss = loss / train_args.gradient_accumulation_steps
                 loss.backward()
-            if gstep % train_args.gradient_accumulation_steps == 0:
+            if global_step % train_args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 if train_args.use_scheduler:
                     scheduler.step()
                 optimizer.zero_grad()
-            if gstep % eval_step == 0:
+            if global_step % eval_step == 0:
                 dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
                 for subset, value in dev_losses.items():
-                    logger.info(f"Epoch: {epoch} | Batch: {gstep} | {subset} loss: {value:.8f}")
-                    writer.add_scalar(f'Loss/{subset}', value, global_step=gstep * train_args.batch_size)
-                save_checkpoint(train_dev_args, tokenizer, model, gstep * train_args.batch_size, optimizer, scheduler)
+                    logger.info(
+                        f"Epoch: {epoch} | "
+                        f"Batch: {global_step} | "
+                        f"{subset} loss: {value:.8f}"
+                    )
+                    writer.add_scalar(
+                        f'Loss/{subset}',
+                        value,
+                        global_step=global_step * train_args.batch_size
+                    )
+                save_checkpoint(
+                    train_dev_args,
+                    tokenizer,
+                    model,
+                    global_step * train_args.batch_size,
+                    optimizer,
+                    scheduler
+                )
                 model.train()
-
+            if global_step in train_args.global_step_checkpoints:
+                save_checkpoint(
+                    train_dev_args,
+                    tokenizer,
+                    model,
+                    global_step * train_args.batch_size,
+                    optimizer,
+                    scheduler
+                )
         loss_disp /= (local_step + 1)
         logger.info(
-            f"Epoch: {epoch} | Batch: {gstep} | Train loss: {loss_disp:.8f} | Time: {time.time() - start_time:.3f}")
-        writer.add_scalar('Loss/train', loss_disp, global_step=gstep * train_args.batch_size)
+            f"Epoch: {epoch} | Batch: {global_step} | "
+            f"Train loss: {loss_disp:.8f} | "
+            f"Time: {time.time() - start_time:.3f}"
+        )
+        writer.add_scalar('Loss/train', loss_disp, global_step=global_step * train_args.batch_size)
         dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
         for subset, value in dev_losses.items():
-            logger.info(f"Epoch: {epoch} | Batch: {gstep} | {subset} loss: {value:.8f}")
-            writer.add_scalar(f'Loss/{subset}', value, global_step=gstep * train_args.batch_size)
+            logger.info(f"Epoch: {epoch} | Batch: {global_step} | {subset} loss: {value:.8f}")
+            writer.add_scalar(f'Loss/{subset}', value, global_step=global_step * train_args.batch_size)
 
 
 def set_model(args: DictConfig, data_parallel: bool = False):
@@ -310,24 +338,11 @@ def main(
             args.train,
             data_parallel=args.train.data_parallel
         )
-
-
-    # if 'gpt2' in args.train.model_name_or_path.lower():
     optimizer = AdamW(
         model.parameters(),
         lr=args.train.learning_rate,
         eps=args.train.adam_eps
     )
-    # elif 't5' in args.train.model_name_or_path.lower():
-    #     optimizer = Adafactor(
-    #         model.parameters(),
-    #         lr=args.train.learning_rate,
-    #         scale_parameter=False,
-    #         relative_step=False,
-    #         warmup_init=False
-    #     )
-
-
     train_dataloader = get_dataloader(
         args.train,
         tokenizer,
@@ -344,7 +359,6 @@ def main(
         sampler=SequentialSampler,
         data_size=args.dev.data_size
     )
-
     scheduler = None
     if args.train.use_scheduler:
         t_total = len(train_dataloader) // args.train.gradient_accumulation_steps * args.train.epochs
@@ -353,16 +367,11 @@ def main(
             num_warmup_steps=args.train.warmup_steps,
             num_training_steps=t_total
         )
-
     if ckpt_path:
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
-
     train(args, tokenizer, model, train_dataloader, dev_dataloader,
           optimizer, scheduler, initial_step=initial_step)
 
 
 if __name__ == '__main__':
     main()
-
-
-# TODO: IMPLEMENT CHECKPOINTING AT GIVEN
