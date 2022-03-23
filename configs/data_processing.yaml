@@ -1,6 +1,10 @@
 metadata:
   preprocessing_method: 'd3st_paper'
 preprocessing:
+  prefix_separators:
+    categorical_slots: ':'
+    noncategorical_slots: "="
+    intents: "="
   special_tokens:
     - "[user]"
     - "[system]"

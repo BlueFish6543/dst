@@ -1,0 +1,19 @@
+metadata:
+  preprocessing_method: 'd3st_paper'
+preprocessing:
+  prefix_separators:
+    categorical_slots: '"'
+    noncategorical_slots: "="
+    intents: "="
+  special_tokens:
+    - "[user]"
+    - "[system]"
+    - "[states]"
+    - "[intents]"
+    - "[req_slots]"
+  lowercase_input: true
+  lowercase_targets: true
+  # choose between "heuristic" (carries over values that have been said before)
+  # and "concatenate" which forms a string "val_1|val_2" from a list [val_1,val_2]
+  # The order of the values in the concatenated string is arbitrary.
+  value_selection: "concatenate"
