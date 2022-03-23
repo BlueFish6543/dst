@@ -275,7 +275,7 @@ def decode_checkpoint(
     type=click.Path(exists=True, path_type=Path),
     help="Absolute original train schema path. Used to determine seen/unseen examples",
 )
-@click.option('--dev_small', 'split', flag_value='dev_small', default=True)
+@click.option('--dev_small', 'split', flag_value='dev_small')
 @click.option('--dev', 'split', flag_value='dev')
 @click.option('--test', 'split', flag_value='test')
 def main(
