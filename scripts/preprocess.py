@@ -169,24 +169,31 @@ def value_in_utterance(
     return
 
 
-def process_frame(
+def heuristic_slot_value_selection(
         frame: dict,
-        turn_info: dict,
-        previous_slots: dict,
+        previous_slots: dict[str, dict[str, str]],
         system_utterance: str,
-        user_utterance: str
-):
-    service = frame["service"]
-    state = frame["state"]
-    expected_output = "[states] "
+        user_utterance: str,
+) -> dict[str, str]:
+    """Returns the current values of all slots in the dialogue state, handling
+    situations when there are multiple values by:
 
+        - carrying over a slot value if it has been previously mentioned in the dialogue
+
+        - if the value has not been mentioned in the dialogue, it is searched in the current system utterance
+        first and the current user utterance
+
+        - if none of the above hold true, the first value in the annotation is selected
+    """
+
+    current_slots = {}
+    frame_state = frame["state"]
+    service = frame["service"]
     # Need to handle case when there are multiple possible values for the slot
     # We pick either the one that was previously in the state, or the one that
     # appears in the system/user utterance, or failing which, the first value
     # in the list
-    current_slots = {}
-    # TODO: THIS VERY LIKELY SELECTS VALUE at index 0
-    for slot, values in state["slot_values"].items():
+    for slot, values in frame_state["slot_values"].items():
         assert isinstance(values, list)
         if service in previous_slots and slot in previous_slots[service]:
             assert not isinstance(previous_slots[service][slot], list)
@@ -196,7 +203,66 @@ def process_frame(
         else:
             value = value_in_utterance(values, system_utterance, user_utterance)
             current_slots[slot] = value if value is not None else values[0]
-    # Update
+    return current_slots
+
+
+def concatenated_slot_value_selection(frame: dict, value_selection_config: DictConfig) -> dict[str, str]:
+    """Handles multiple values in dialogue state of a given service by concatenating them.
+
+    Parameters
+    ----------
+    frame
+        Data structure containing the dialogue state of a given service.
+    value_selection_config
+        Options that configure the concatenation formatting. These include:
+
+            - shuffle_before_concat: values are shuffled before being concatenated
+
+            - value_separator: the symbol used to concatenate the values
+    """
+    frame_state = frame["state"]
+    shuffle = value_selection_config.shuffle_before_concat
+    value_sep = value_selection_config.value_separator
+    return {
+        slot: concatenate_values(values, shuffle=shuffle, separator=value_sep)
+        for slot, values in frame_state["slot_values"].items()
+    }
+
+
+def concatenate_values(values: list[str], shuffle: bool = True, separator: str = "|") -> str:
+    assert isinstance(values, list) and isinstance(values[0], str)
+    if len(values) == 1:
+        return values[0]
+    if shuffle:
+        random.shuffle(values)
+    return f"{separator}".join(values)
+
+
+def process_frame(
+        frame: dict,
+        turn_info: dict,
+        previous_slots: dict,
+        system_utterance: str,
+        user_utterance: str,
+        value_selection_config: DictConfig,
+):
+    service = frame["service"]
+    state = frame["state"]
+    targets = "[states] "
+
+    # handle cases where annotations contain multiple values
+    if value_selection_config.method == 'heuristic':
+        current_slots = heuristic_slot_value_selection(
+            frame, previous_slots, system_utterance, user_utterance
+        )
+    elif value_selection_config.method == 'concatenate':
+        current_slots = concatenated_slot_value_selection(
+            frame, value_selection_config
+        )
+    else:
+        raise ValueError(
+            "Unknown argument for value_selection_config! Expected one of 'heuristic' or 'concatenate"
+         )
     previous_slots[service] = current_slots
 
     # Slot values
@@ -214,25 +280,25 @@ def process_frame(
                 #     expected_output += f"{i}:dontcare "
                 # else:
                 #     expected_output += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
-                expected_output += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
+                targets += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
             else:
                 # Non-categorical
-                expected_output += f"{i}:{current_slots[slot]} "
+                targets += f"{i}:{current_slots[slot]} "
 
     # Active intent
-    expected_output += "[intents] "
+    targets += "[intents] "
     if state["active_intent"] != "NONE":
-        expected_output += turn_info[service]["intent_mapping"][state["active_intent"]] + " "
+        targets += turn_info[service]["intent_mapping"][state["active_intent"]] + " "
 
     # Requested slots
-    expected_output += "[req_slots] "
+    targets += "[req_slots] "
     for i in range(len(slot_mapping) // 2):
         slot = slot_mapping[i]
         if slot in state["requested_slots"]:
-            expected_output += f"{i} "
+            targets += f"{i} "
 
     # Update
-    turn_info[service]["expected_output"] = expected_output.strip()
+    turn_info[service]["expected_output"] = targets.strip()
 
 
 def generate_description(schema: List[dict], turn: dict, prefix_separators: DictConfig) -> dict:
@@ -308,7 +374,14 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
                     # Each frame represents one service
-                    process_frame(frame, turn_info, previous_slots, system_utterance, user_utterance)
+                    process_frame(
+                        frame,
+                        turn_info,
+                        previous_slots,
+                        system_utterance,
+                        user_utterance,
+                        config.value_selection,
+                    )
                 result[dialogue_id].append({
                     "frames": turn_info,
                     "system_utterance": system_utterance,
@@ -316,7 +389,7 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
                 })
 
             else:
-                raise ValueError("Unknown speaker.")
+                raise ValueError(f"Unknown speaker {turn['speaker']}.")
     return result
 
 @click.command()
