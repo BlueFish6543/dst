@@ -35,7 +35,7 @@ def set_seed(args):
 
 def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     ckpt_path = Path(args.train.checkpoint_dir)
-    ckpt_path = ckpt_path.joinpath(args.train.experiment_name)
+    ckpt_path = ckpt_path.joinpath(args.train.experiment_name, f"version_{args.data.version}")
     if not ckpt_path.exists():
         ckpt_path.mkdir(exist_ok=True, parents=True)
     save_path = f"{ckpt_path}/model.{step}"
@@ -66,7 +66,7 @@ def load_model(args: DictConfig, device: Union[torch.device, str], data_parallel
     return model.config, tokenizer, model
 
 
-def load_optimizer_scheduler(ckpt_path, optimizer, scheduler):
+def load_optimizer_scheduler(ckpt_path: str, optimizer, scheduler):
     checkpoint = torch.load(os.path.join(ckpt_path, "checkpoint.pth"))
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     if scheduler is not None:

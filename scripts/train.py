@@ -119,7 +119,7 @@ def compute_dev_lm_loss(args, dataloader, model) -> dict[str, float]:
 def train(args, tokenizer, model, train_dataloader, dev_dataloader, optimizer, scheduler, initial_step: int  = 0):
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
-    log_dir = Path().resolve().joinpath(f"runs/{train_args.experiment_name}")
+    log_dir = Path().resolve().joinpath("runs", f"{train_args.experiment_name}_version_{args.data.version}")
     writer = SummaryWriter(
         log_dir=str(log_dir),
     )
@@ -283,7 +283,23 @@ def main(
         orig_train_schema_path: pathlib.Path,
 ):
     args = OmegaConf.load(args_path)
-    log_dir = Path(args.train.checkpoint_dir).joinpath(args.train.experiment_name, 'logs').resolve()
+    set_seed(args.reproduce)
+    data_versions = {get_data_version(p) for p in train_path}
+    assert len(data_versions) == 1, f"Attempting to train on multiple data versions {data_versions}"
+    args.data.version = list(data_versions)[0]
+    special_tokens = []
+    for p in train_path:
+        model_input_config = OmegaConf.load(f"{p.parent.joinpath('preprocessing_config.yaml')}")
+        args.data.metadata[str(p)] = model_input_config.metadata
+        args.data.preprocessing[str(p)] = model_input_config.preprocessing
+        special_tokens.extend(model_input_config.preprocessing.special_tokens)
+    args.train.special_tokens = list(set(special_tokens))
+    args.train.dst_train_path = [str(p) for p in train_path]  # type: list[str]
+    args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
+
+    log_dir = Path(args.train.checkpoint_dir).joinpath(
+        args.train.experiment_name, args.data.version, 'logs'
+    ).resolve()
     if not log_dir.exists():
         log_dir.mkdir(exist_ok=True, parents=True)
     handlers = [
@@ -306,19 +322,6 @@ def main(
 
     logger.info(OmegaConf.to_yaml(args))
     logger.info("Training on: {}".format('GPU' if 'cuda' in DEVICE.type else 'CPU'))
-    set_seed(args.reproduce)
-    data_versions = {get_data_version(p) for p in train_path}
-    assert len(data_versions) == 1, f"Attempting to train on multiple data versions {data_versions}"
-    special_tokens = []
-    for p in train_path:
-        model_input_config = OmegaConf.load(f"{p.parent.joinpath('preprocessing_config.yaml')}")
-        args.data.preprocessing[str(p)] = model_input_config.metadata
-        args.data.version = list(data_versions)[0]
-        special_tokens.extend(model_input_config.preprocessing.special_tokens)
-    args.train.special_tokens = list(set(special_tokens))
-    args.train.dst_train_path = [str(p) for p in train_path]  # type: list[str]
-    args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
-
     initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
     orig_train_schema = load_schema(orig_train_schema_path)
     if orig_train_schema is None:

@@ -372,6 +372,7 @@ def main(
     else:
         try:
             if checkpoint.exists():
+                assert 'model.' in checkpoint.name, "Path to model checkpoint should end in /model.*/"
                 all_checkpoints = [checkpoint]
         except AttributeError:
             if not args.checkpoint:
@@ -383,17 +384,23 @@ def main(
                     f"No checkpoint exists at {args.checkpoint}. Make sure you provide absolute path!"
                 )
             else:
-                all_checkpoints = [Path(args.checkpoint)]
+                checkpoint = Path(args.checkpoint)
+                assert 'model.' in checkpoint.name, "Path to model checkpoint should end in /model.*/"
+                all_checkpoints = [checkpoint]
     logger.info(f"Decoding {len(all_checkpoints)} checkpoints")
     # Decode checkpoints sequentially
     for ckpt_number, checkpoint in enumerate(all_checkpoints):
         logger.info(f"Decoding checkpoint {ckpt_number}...")
         model_config = OmegaConf.load(checkpoint.parent.joinpath("model_config.yaml"))
         config_data_version = model_config.data.version
-        if config_data_version != test_data_version:
+        inferred_checkpoint_data_version = infer_data_version_from_path(str(checkpoint))
+        data_versions = [inferred_checkpoint_data_version, config_data_version, test_data_version]
+        if len(set(data_versions)) != 1:
             logger.error(
-                f"Data version: {test_data_version}. Checkpoint_version: {config_data_version}."
-                f"Decoding aborted"
+                f"Test data version: {test_data_version}. "
+                f"Checkpoint version: {config_data_version}. "
+                f"Checkpoint version inferred from path: {inferred_checkpoint_data_version}."
+                f"Decoding aborted!"
             )
             raise ValueError("Incorrect data version!")
         belief_states = decode_checkpoint(args, checkpoint, hyp_path)

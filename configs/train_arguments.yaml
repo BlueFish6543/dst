@@ -2,6 +2,7 @@ data:
   # This is updated at runtime based on data version provided in CLI
   version: -1
   preprocessing: {}
+  metadata: {}
 
 train:
   model_name_or_path: 't5-base'
