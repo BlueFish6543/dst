@@ -254,11 +254,11 @@ def process_frame(
     if value_selection_config.method == 'heuristic':
         current_slots = heuristic_slot_value_selection(
             frame, previous_slots, system_utterance, user_utterance
-        )
+        )  # type: dict[str, str]
     elif value_selection_config.method == 'concatenate':
         current_slots = concatenated_slot_value_selection(
             frame, value_selection_config
-        )
+        )  # type: dict[str, str]
     else:
         raise ValueError(
             "Unknown argument for value_selection_config! Expected one of 'heuristic' or 'concatenate"
@@ -358,10 +358,10 @@ def generate_description(
     return result
 
 
-def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
+def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) -> dict:
     result = {}
     lowercase_model_inputs=config.lowercase_model_inputs
-    for dialogue in data:
+    for dialogue in raw_dialogues:
         dialogue_id = dialogue["dialogue_id"]
         result[dialogue_id] = []
         system_utterance = ""
@@ -469,12 +469,10 @@ def main(
         for file in this_shard_data_dir.iterdir():
             if pattern.match(file.name):
                 with open(file, "r") as f:
-                    data = json.load(f)
-                result.update(process_file(schema, data, config.preprocessing))
+                    raw_dialogues = json.load(f)
+                result.update(process_file(schema, raw_dialogues, config.preprocessing))
         save_data(result, output_path.joinpath(schema_variant, split), metadata=config)
 
 
 if __name__ == '__main__':
     main()
-
-# TODO: CHECK CASING DOES NOT AFFECT HOW PRERPOCESSING WORKS
