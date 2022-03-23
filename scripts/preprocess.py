@@ -245,11 +245,11 @@ def process_frame(
         system_utterance: str,
         user_utterance: str,
         value_selection_config: DictConfig,
+        lowercase: bool = False,
 ):
     service = frame["service"]
     state = frame["state"]
     targets = "[states] "
-
     # handle cases where annotations contain multiple values
     if value_selection_config.method == 'heuristic':
         current_slots = heuristic_slot_value_selection(
@@ -274,12 +274,6 @@ def process_frame(
         if slot in current_slots:
             # Active
             if slot in cat_values_mapping:
-                # Categorical
-                # if current_slots[slot] == "dontcare":
-                #     # "dontcare" is not in the schema
-                #     expected_output += f"{i}:dontcare "
-                # else:
-                #     expected_output += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
                 targets += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
             else:
                 # Non-categorical
@@ -298,7 +292,7 @@ def process_frame(
             targets += f"{i} "
 
     # Update
-    turn_info[service]["expected_output"] = targets.strip()
+    turn_info[service]["expected_output"] = targets.strip().lower() if lowercase else targets.strip()
 
 
 def generate_description(
@@ -392,7 +386,7 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
                         system_utterance,
                         user_utterance,
                         config.value_selection,
-                        config.lowercase_model_targets
+                        lowercase=config.lowercase_model_targets
                     )
                 result[dialogue_id].append({
                     "frames": turn_info,
@@ -482,3 +476,5 @@ def main(
 
 if __name__ == '__main__':
     main()
+
+# TODO: CHECK CASING DOES NOT AFFECT HOW PRERPOCESSING WORKS
