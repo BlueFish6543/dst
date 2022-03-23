@@ -18,3 +18,4 @@ preprocessing:
     value_separator: "|"
     # changes the order wrt annotation before concatenation
     shuffle_before_concat: true
+  lowercase_model_inputs: true
