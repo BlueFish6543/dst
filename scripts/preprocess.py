@@ -366,6 +366,7 @@ def generate_description(
 
 def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
     result = {}
+    lowercase_model_inputs=config.lowercase_model_inputs
     for dialogue in data:
         dialogue_id = dialogue["dialogue_id"]
         result[dialogue_id] = []
@@ -379,7 +380,7 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
                     schema,
                     turn,
                     config.prefix_separators,
-                    lowercase=config.lowercase_model_inputs
+                    lowercase=lowercase_model_inputs
                 )
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
@@ -391,11 +392,12 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
                         system_utterance,
                         user_utterance,
                         config.value_selection,
+                        config.lowercase_model_targets
                     )
                 result[dialogue_id].append({
                     "frames": turn_info,
-                    "system_utterance": system_utterance,
-                    "user_utterance": user_utterance
+                    "system_utterance": system_utterance.lower() if lowercase_model_inputs else system_utterance,
+                    "user_utterance": user_utterance.lower() if lowercase_model_inputs else user_utterance,
                 })
 
             else:
