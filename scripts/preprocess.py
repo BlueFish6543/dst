@@ -301,7 +301,12 @@ def process_frame(
     turn_info[service]["expected_output"] = targets.strip()
 
 
-def generate_description(schema: List[dict], turn: dict, prefix_separators: DictConfig) -> dict:
+def generate_description(
+        schema: List[dict],
+        turn: dict,
+        prefix_separators: DictConfig,
+        lowercase: bool = False
+)-> dict:
     services = list(sorted([frame["service"] for frame in turn["frames"]]))
     ordered_services = [s["service_name"] for s in schema]
     assert ordered_services == sorted(ordered_services)
@@ -348,7 +353,7 @@ def generate_description(schema: List[dict], turn: dict, prefix_separators: Dict
                 intent_mapping[f"i{i}"] = intent_name
 
             result[service_name] = {
-                "description": description.strip(),
+                "description": description.strip().lower() if lowercase else description.strip(),
                 "slot_mapping": slot_mapping,
                 "cat_values_mapping": cat_values_mapping,
                 "intent_mapping": intent_mapping
@@ -370,7 +375,12 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
             if turn["speaker"] == "SYSTEM":
                 system_utterance = turn["utterance"]
             elif turn["speaker"] == "USER":
-                turn_info = generate_description(schema, turn, config.prefix_separators)
+                turn_info = generate_description(
+                    schema,
+                    turn,
+                    config.prefix_separators,
+                    lowercase=config.lowercase_model_inputs
+                )
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
                     # Each frame represents one service
