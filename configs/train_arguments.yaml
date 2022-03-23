@@ -26,6 +26,8 @@ train:
   verbose:
     disable_display: false
   data_parallel: False
+  # Use this to save a model checkpoint after a specified number of batches
+  global_step_checkpoints: []
 
 dev:
   model_name_or_path: 't5-base'
