@@ -11,3 +11,10 @@ preprocessing:
     - "[states]"
     - "[intents]"
     - "[req_slots]"
+  # choose between "heuristic" (carries over values that have been said before)
+  # and "concatenate" which forms a string "val_1|val_2" from a list [val_1,val_2]
+  value_selection:
+    method: "concatenate"
+    value_separator: "|"
+    # changes the order wrt annotation before concatenation
+    shuffle_before_concat: true
