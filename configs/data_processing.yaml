@@ -19,3 +19,4 @@ preprocessing:
     # changes the order wrt annotation before concatenation
     shuffle_before_concat: true
   lowercase_model_inputs: true
+  lowercase_model_targets: true
