@@ -20,7 +20,7 @@ SPECIAL_TOKENS = {
     "eos_token": "<EOS>",
     "pad_token": "<PAD>",
     "sep_token": "<SEP>",
-    "additional_special_tokens": ["[user]", "[system]", "[states]", "[intents]", "[req_slots]"]
+    "additional_special_tokens": []
 }
 
 

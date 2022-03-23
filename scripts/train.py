@@ -192,6 +192,7 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     else:
         raise ValueError("Unsupported model.")
     vocabulary = Vocabulary()
+    vocabulary.add_special_tokens(args.special_tokens)
     tokenizer.add_special_tokens(vocabulary.special_tokens)
     model.resize_token_embeddings(len(tokenizer))
     if data_parallel:
@@ -276,15 +277,17 @@ def main(
         logger.info(f"Restarting training from checkpoint: {ckpt_path}")
 
     logger.info(OmegaConf.to_yaml(args))
-    #logger.info("Training on: {}".format('GPU' if 'cuda' in DEVICE.type else 'CPU'))
+    logger.info("Training on: {}".format('GPU' if 'cuda' in DEVICE.type else 'CPU'))
     set_seed(args.reproduce)
     data_versions = {get_data_version(p) for p in train_path}
     assert len(data_versions) == 1, f"Attempting to train on multiple data versions {data_versions}"
+    special_tokens = []
     for p in train_path:
         model_input_config = OmegaConf.load(f"{p.parent.joinpath('preprocessing_config.yaml')}")
         args.data.preprocessing[str(p)] = model_input_config.metadata
         args.data.version = list(data_versions)[0]
-
+        special_tokens.extend(model_input_config.preprocessing.special_tokens)
+    args.train.special_tokens = list(set(special_tokens))
     args.train.dst_train_path = [str(p) for p in train_path]  # type: list[str]
     args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
 
@@ -361,3 +364,5 @@ def main(
 if __name__ == '__main__':
     main()
 
+
+# TODO: IMPLEMENT CHECKPOINTING AT GIVEN

@@ -1,2 +1,9 @@
 metadata:
-  preprocessing_method: 'zhe_d3st_orig'
+  preprocessing_method: 'd3st_paper'
+preprocessing:
+  special_tokens:
+    - "[user]"
+    - "[system]"
+    - "[states]"
+    - "[intents]"
+    - "[req_slots]"
