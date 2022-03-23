@@ -348,7 +348,7 @@ def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
     type=click.Path(exists=False),
     help="Directory where processed data is output.",
 )
-@click.option('--train', 'split', flag_value='train', default=True)
+@click.option('--train', 'split', flag_value='train')
 @click.option('--dev', 'split', flag_value='dev')
 @click.option('--dev_small', 'split', flag_value='dev_small')
 @click.option('--test', 'split', flag_value='test')
