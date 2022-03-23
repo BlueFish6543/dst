@@ -57,13 +57,15 @@ def parse_predicted_string(
                             success = True
                             break
                     if not success:
-                        logger.warning(f"Could not extract categorical value for slot {pair[0].strip()} in "
-                                       f"{predicted_str} in {dialogue_id}_{turn_index}.")
+                        logger.warning(
+                            f"Could not extract categorical value for slot {pair[0].strip()} in "
+                            f"{predicted_str} in {dialogue_id}_{turn_index}.")
                 else:
                     # Non-categorical
                     # Check if the next slot could potentially be part of the current slot
                     value = pair[1]
                     j = i + 1
+                    # TODO: COULD THIS ALSO BE FUZZY MATCH? CHECK OUTPUTS TO FIND OUT!
                     while j < len(substrings):
                         # Check if the combined string exists in the context
                         if (value + substrings[j]).replace(" ", "").lower() not in context.replace(" ", "").lower():
@@ -74,8 +76,10 @@ def parse_predicted_string(
                     state["values"][slot] = [value.strip()]
                     if value.replace(" ", "").lower() not in context.replace(" ", "").lower():
                         # Replace spaces to avoid issues with whitespace
-                        logger.warning(f"Predicted value {value.strip()} for slot {pair[0].strip()} "
-                                       f"not in context in {dialogue_id}_{turn_index}.")
+                        logger.warning(
+                            f"Predicted value {value.strip()} for slot {pair[0].strip()} "
+                           f"not in context in {dialogue_id}_{turn_index}."
+                        )
             except KeyError:
                 logger.warning(
                     f"Could not extract slot {pair[0].strip()} in {predicted_str} in {dialogue_id}_{turn_index}.")
@@ -106,7 +110,7 @@ def populate_slots(
         dialogue_id: str,
         schema: dict,
         model_name: str,
-        data: dict
+        preprocessed_references: dict
 ):
     context = ""
     for turn_index in predicted_data:
@@ -117,7 +121,7 @@ def populate_slots(
         template_turn = template_dialogue["turns"][int(turn_index) * 2]  # skip system turns
         context += template_turn["utterance"] + " "  # concatenate user utterance
         assert template_turn["speaker"] == "USER"
-        data_turn = data[int(turn_index)]
+        ref_proc_turn = preprocessed_references[int(turn_index)]
 
         for frame in template_turn["frames"]:
             # Loop over frames (services)
@@ -140,7 +144,7 @@ def populate_slots(
                 except AssertionError:
                     logger.warning(
                         f"{predicted_str} in {dialogue_id}_{turn_index} does not match user utterance. Skipping.")
-                    continue
+                    raise AssertionError
             if "<EOS>" not in predicted_str:
                 logger.warning(f"No <EOS> token in {dialogue_id}_{turn_index}. Skipping.")
                 continue
@@ -155,9 +159,9 @@ def populate_slots(
 
             state = parse_predicted_string(
                 dialogue_id, turn_index, predicted_str,
-                data_turn["frames"][service_name]["slot_mapping"],
-                data_turn["frames"][service_name]["cat_values_mapping"],
-                data_turn["frames"][service_name]["intent_mapping"],
+                ref_proc_turn["frames"][service_name]["slot_mapping"],
+                ref_proc_turn["frames"][service_name]["cat_values_mapping"],
+                ref_proc_turn["frames"][service_name]["intent_mapping"],
                 context
             )
             # Update
@@ -168,46 +172,47 @@ def populate_slots(
                 frame["state"]["requested_slots"].append(requested)
 
 
-def parse(
-        schema: dict,
-        predictions: dict,
-        root: str,
-        data: dict,
-):
-    with open(os.path.join(root, "experiment_config.yaml"), "r") as f:
+def parse(schema: dict, predictions: dict, belief_states_dir: str, preprocessed_references: dict):
+    with open(os.path.join(belief_states_dir, "experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
         model_name = config.decode.model_name_or_path
 
     pattern = re.compile(r"dialogues_[0-9]+\.json")
-    for file in os.listdir(root):
+    for file in os.listdir(belief_states_dir):
         if pattern.match(file):
             logger.info(f"Parsing file {file}.")
-            with open(os.path.join(root, file), "r") as f:
-                dialogues = json.load(f)
-                for dialogue in dialogues:
-                    dialogue_id = dialogue["dialogue_id"]
-                    try:
-                        predicted_data = predictions[dialogue_id]
-                    except KeyError:
-                        logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
-                        continue
-                    populate_slots(predicted_data, dialogue, dialogue_id, schema, model_name,
-                                   data[dialogue_id])
-            with open(os.path.join(root, file), "w") as f:
-                json.dump(dialogues, f, indent=4)
+            with open(os.path.join(belief_states_dir, file), "r") as f:
+                dialogue_templates = json.load(f)
+            for blank_dialogue in dialogue_templates:
+                dialogue_id = blank_dialogue["dialogue_id"]
+                try:
+                    predicted_data = predictions[dialogue_id]
+                except KeyError:
+                    logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
+                    raise KeyError
+                populate_slots(
+                    predicted_data,
+                    blank_dialogue,
+                    dialogue_id,
+                    schema,
+                    model_name,
+                    preprocessed_references[dialogue_id]
+                    )
+            with open(os.path.join(belief_states_dir, file), "w") as f:
+                json.dump(dialogue_templates, f, indent=4)
 
 
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument("-d", "--directory", required=True,
-                        help="Directory under which predicted belief states for all model checkpoints "
-                             "are located")
+                        help="Directory under which predicted belief states file for a given model checkpoint "
+                             "is located")
     parser.add_argument("-s", "--schema", required=True,
                         help="Path to schema.json file")
     parser.add_argument("-t", "--template", required=True,
                         help="Directory containing blank dialogue templates")
     parser.add_argument("-j", "--json", required=True,
-                        help="Path to JSON file containing test data")
+                        help="Path to JSON file containing pre-processed test preprocessed_references")
     return parser.parse_args()
 
 
@@ -231,18 +236,17 @@ def main():
     with open(args.schema, "r") as f:
         schema = json.load(f)
     with open(args.json, "r") as f:
-        dataset = json.load(f)
-        data = dataset["data"]
+        preprocessed_refs = json.load(f)
 
-    for root, dirs, files in os.walk(args.directory):
+    for belief_states_file_dir, dirs, files in os.walk(args.directory):
         for file in files:
             if file == "belief_states.json":
                 # Copy templates over first
-                copy_tree(args.template, root)
-                logger.info(f"Parsing {root} directory.")
-                with open(os.path.join(root, file), "r") as f:
+                copy_tree(args.template, belief_states_file_dir)
+                logger.info(f"Parsing {belief_states_file_dir} directory.")
+                with open(os.path.join(belief_states_file_dir, file), "r") as f:
                     predictions = json.load(f)
-                    parse(schema, predictions, root, data)
+                parse(schema, predictions, belief_states_file_dir, preprocessed_refs)
 
 
 if __name__ == '__main__':
