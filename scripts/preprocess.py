@@ -11,13 +11,13 @@ import re
 import string
 from typing import Optional, List
 
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig
 
 from src.dst.utils import infer_schema_variant_from_path, save_data, get_datetime
 
 logger = logging.getLogger(__name__)
 
-DONTCARE = {
+CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Banks_1": ["recipient_account_type"],
     "Banks_11": ["recipient_account_type"],
     "Banks_12": ["recipient_account_type"],
@@ -235,10 +235,7 @@ def process_frame(
     turn_info[service]["expected_output"] = expected_output.strip()
 
 
-def generate_description(
-        schema: List[dict],
-        turn: dict
-) -> dict:
+def generate_description(schema: List[dict], turn: dict, prefix_separators: DictConfig) -> dict:
     services = list(sorted([frame["service"] for frame in turn["frames"]]))
     ordered_services = [s["service_name"] for s in schema]
     assert ordered_services == sorted(ordered_services)
@@ -247,36 +244,40 @@ def generate_description(
         if service["service_name"] == services[0]:
             service_name = service["service_name"]
             description = ""
-            slot_mapping = {}  # two-way dictionary between slot names and indices
-            cat_values_mapping = {}  # slot to (value to index)
-            intent_mapping = {}  # two-way dictionary between intent names and indices
+            slot_mapping = {}  # maps slot names to indices and indices to slot names
+            cat_values_mapping = {}  # nested mapping of from slot to value to index
+            intent_mapping = {}  # maps intent names to indices and indices to intent names
 
             random.shuffle(service["slots"])
             for i, slot in enumerate(service["slots"]):
                 slot_name = slot["name"]
                 slot_description = slot["description"]
-                # TODO: SEPARATOR IS = not :
-                description += f"{i}:{slot_description} "
+                if slot["is_categorical"]:
+                    separator = prefix_separators.categorical_slots
+                else:
+                    separator = prefix_separators.noncategorical_slots
+                description += f"{i}{separator}{slot_description} "
                 slot_mapping[slot_name] = i
                 slot_mapping[i] = slot_name
 
                 if slot["is_categorical"]:
-                    if service_name in DONTCARE and slot_name in DONTCARE[service_name] and \
+                    # append dontcare to descriptions of categorical slots if this value is possible
+                    if service_name in CATEGORICALS_WITH_DONTCARE_VALUE \
+                            and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service_name] and \
                             "dontcare" not in slot["possible_values"]:
                         slot["possible_values"].append("dontcare")
                     assert len(slot["possible_values"]) == len(set(slot["possible_values"]))
                     random.shuffle(slot["possible_values"])
                     cat_values_mapping[slot_name] = {}  # value to index
-                    for s, value in zip(list(string.ascii_lowercase), slot["possible_values"]):
-                        description += f"{i}{s}) {value} "
-                        cat_values_mapping[slot_name][value] = f"{i}{s}"
+                    for index_letter, value in zip(list(string.ascii_lowercase), slot["possible_values"]):
+                        description += f"{i}{index_letter}) {value} "
+                        cat_values_mapping[slot_name][value] = f"{i}{index_letter}"
 
             random.shuffle(service["intents"])
             for i, intent in enumerate(service["intents"], 1):
                 intent_name = intent["name"]
                 intent_description = intent["description"]
-                # TODO: SEPARATOR IS = NOT :
-                description += f"i{i}:{intent_description} "
+                description += f"i{i}{prefix_separators.intents}{intent_description} "
                 intent_mapping[intent_name] = f"i{i}"
                 intent_mapping[f"i{i}"] = intent_name
 
@@ -292,10 +293,7 @@ def generate_description(
     return result
 
 
-def process_file(
-        schema: List[dict],
-        data: list
-) -> dict:
+def process_file(schema: List[dict], data: list, config: DictConfig) -> dict:
     result = {}
     for dialogue in data:
         dialogue_id = dialogue["dialogue_id"]
@@ -305,9 +303,8 @@ def process_file(
         for turn in dialogue["turns"]:
             if turn["speaker"] == "SYSTEM":
                 system_utterance = turn["utterance"]
-                # We don't need to do anything else
             elif turn["speaker"] == "USER":
-                turn_info = generate_description(schema, turn)
+                turn_info = generate_description(schema, turn, config.prefix_separators)
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
                     # Each frame represents one service
@@ -394,7 +391,7 @@ def main(
             if pattern.match(file.name):
                 with open(file, "r") as f:
                     data = json.load(f)
-                result.update(process_file(schema, data))
+                result.update(process_file(schema, data, config.preprocessing))
         save_data(result, output_path.joinpath(schema_variant, split), metadata=config)
 
 
