@@ -15,8 +15,14 @@ preprocessing:
   # and "concatenate" which forms a string "val_1|val_2" from a list [val_1,val_2]
   value_selection:
     method: "concatenate"
-    value_separator: "|"
+    value_separator: " | "
     # changes the order wrt annotation before concatenation
     shuffle_before_concat: true
   lowercase_model_inputs: true
   lowercase_model_targets: true
+reproduce:
+  seed: 20220303 # same seed for random, NumPy, PyTorch (CPU/GPU), across devices
+  cudnn:
+    enabled: True
+    deterministic: False
+    benchmark: True
