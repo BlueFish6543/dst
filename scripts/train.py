@@ -17,7 +17,6 @@ from torch.utils.data import (
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import (
-    AdamW,
     AutoConfig,
     GPT2LMHeadModel,
     GPT2Tokenizer,
@@ -25,7 +24,7 @@ from transformers import (
     T5Tokenizer,
     get_linear_schedule_with_warmup,
 )
-
+from torch.optim import AdamW
 from src.dst.dataset import (
     TrainDataset,
     Vocabulary
@@ -298,7 +297,7 @@ def main(
     args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
 
     log_dir = Path(args.train.checkpoint_dir).joinpath(
-        args.train.experiment_name, args.data.version, 'logs'
+        args.train.experiment_name, f"version_{args.data.version}", 'logs'
     ).resolve()
     if not log_dir.exists():
         log_dir.mkdir(exist_ok=True, parents=True)
