@@ -13,7 +13,7 @@ from typing import Optional, List
 
 from omegaconf import OmegaConf, DictConfig
 
-from src.dst.utils import infer_schema_variant_from_path, save_data, get_datetime
+from src.dst.utils import infer_schema_variant_from_path, save_data, get_datetime, set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -408,7 +408,7 @@ def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) ->
     "cfg_path",
     required=True,
     type=click.Path(exists=True),
-    help="path to config file",
+    help="Path to data preprocessing config file.",
 )
 @click.option(
     "-d",
@@ -438,7 +438,6 @@ def main(
         output_path: pathlib.Path,
         split: str,
 ):
-
     logging.basicConfig(
         stream=sys.stdout,
         level=log_level,
@@ -446,6 +445,7 @@ def main(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     config = OmegaConf.load(cfg_path)
+    set_seed(config.reproduce)
     config.metadata.date = get_datetime()
     config.metadata.raw_data_path = [p for p in data_paths]
     config.metadata.split = split
