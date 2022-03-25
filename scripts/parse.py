@@ -20,10 +20,11 @@ def parse_predicted_string(
         intent_mapping: dict,
         context: str
 ) -> dict:
+
     state = {
-        "values": {},
-        "intent": "NONE",
-        "requested": []
+        "slot_values": {},
+        "active_intent": "NONE",
+        "requested_slots": []
     }
     # Expect [states] 0:value 1:1a ... [intents] i1 [req_slots] 2 ...
     match = re.search(r"\[states](.*)\[intents](.*)\[req_slots](.*)", predicted_str)
@@ -64,6 +65,7 @@ def parse_predicted_string(
                     # Non-categorical
                     # Check if the next slot could potentially be part of the current slot
                     value = pair[1]
+                    # TODO: DEPENDING ON INPUT PREPROCESSING SPLIT MULTIPLE VALUES HERE
                     j = i + 1
                     # TODO: COULD THIS ALSO BE FUZZY MATCH? CHECK OUTPUTS TO FIND OUT!
                     while j < len(substrings):
@@ -122,11 +124,10 @@ def populate_slots(
         context += template_turn["utterance"] + " "  # concatenate user utterance
         assert template_turn["speaker"] == "USER"
         ref_proc_turn = preprocessed_references[int(turn_index)]
-
-        for frame in template_turn["frames"]:
+        for empty_ref_frame in template_turn["frames"]:
             # Loop over frames (services)
             # Get schema from schema.json
-            service_name = frame["service"]
+            service_name = empty_ref_frame["service"]
             service_schema = None
             for s in schema:
                 if s["service_name"] == service_name:
@@ -165,11 +166,8 @@ def populate_slots(
                 context
             )
             # Update
-            for slot, value_list in state["values"].items():
-                frame["state"]["slot_values"][slot] = value_list
-            frame["state"]["active_intent"] = state["intent"]
-            for requested in state["requested"]:
-                frame["state"]["requested_slots"].append(requested)
+            empty_ref_frame_state = empty_ref_frame["state"]
+            empty_ref_frame_state.update(state)
 
 
 def parse(schema: dict, predictions: dict, belief_states_dir: str, preprocessed_references: dict):
