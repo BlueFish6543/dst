@@ -1,11 +1,13 @@
 import json
 import logging
 import os
+import pathlib
 import re
 import sys
-from argparse import ArgumentParser
 from distutils.dir_util import copy_tree
+from pathlib import Path
 
+import click
 from omegaconf import OmegaConf
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,7 @@ def parse_predicted_string(
                     # Invert the mapping to get the categorical value
                     for key, value in cat_values_mapping[slot].items():
                         if value == pair[1].strip():
-                            state["values"][slot] = [key]
+                            state["slot_values"][slot] = [key]
                             success = True
                             break
                     if not success:
@@ -75,7 +77,7 @@ def parse_predicted_string(
                             break
                         value += " " + substrings[j]
                         skip += 1  # skip the next iteration through substring as it was part of the current slot
-                    state["values"][slot] = [value.strip()]
+                    state["slot_values"][slot] = [value.strip()]
                     if value.replace(" ", "").lower() not in context.replace(" ", "").lower():
                         # Replace spaces to avoid issues with whitespace
                         logger.warning(
@@ -90,7 +92,7 @@ def parse_predicted_string(
     intent = match.group(2).strip()
     if intent:
         try:
-            state["intent"] = intent_mapping[intent]
+            state["active_intent"] = intent_mapping[intent]
         except KeyError:
             logger.warning(f"Could not extract intent in {predicted_str} in {dialogue_id}_{turn_index}.")
 
@@ -98,7 +100,7 @@ def parse_predicted_string(
     requested = match.group(3).strip().split()
     for index in requested:
         try:
-            state["requested"].append(slot_mapping[index.strip()])
+            state["requested_slots"].append(slot_mapping[index.strip()])
         except KeyError:
             logger.warning(
                 f"Could not extract requested slot {index.strip()} in {predicted_str} in {dialogue_id}_{turn_index}.")
@@ -170,16 +172,35 @@ def populate_slots(
             empty_ref_frame_state.update(state)
 
 
-def parse(schema: dict, predictions: dict, belief_states_dir: str, preprocessed_references: dict):
-    with open(os.path.join(belief_states_dir, "experiment_config.yaml"), "r") as f:
+def parse(
+        schema: dict,
+        predictions: dict,
+        belief_states_dir: pathlib.Path,
+        preprocessed_references: dict,
+        save_to_subdir: str,
+):
+    """
+    Parameters
+    ----------
+    save_to_subdir
+        Processed files saved to a subdirectory located in `belief_states_dir` directory.
+        Used to avoid overriding data during testing.
+    """
+    with open(belief_states_dir.joinpath("experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
-        model_name = config.decode.model_name_or_path
+    model_name = config.decode.model_name_or_path
 
+    # save to a subdirectory, optionally
+    if save_to_subdir:
+        if not belief_states_dir.joinpath(save_to_subdir).exists():
+            belief_states_dir.joinpath(save_to_subdir).mkdir(exist_ok=True, parents=True)
+
+    # TODO: USE EXPERIMENT CONFIGURATION HERE TO RETRIEVE INFORMATION ABOUT PREPROCESSING
     pattern = re.compile(r"dialogues_[0-9]+\.json")
-    for file in os.listdir(belief_states_dir):
-        if pattern.match(file):
+    for file in belief_states_dir.iterdir():
+        if pattern.match(file.name):
             logger.info(f"Parsing file {file}.")
-            with open(os.path.join(belief_states_dir, file), "r") as f:
+            with open(file, "r") as f:
                 dialogue_templates = json.load(f)
             for blank_dialogue in dialogue_templates:
                 dialogue_id = blank_dialogue["dialogue_id"]
@@ -196,56 +217,81 @@ def parse(schema: dict, predictions: dict, belief_states_dir: str, preprocessed_
                     model_name,
                     preprocessed_references[dialogue_id]
                     )
-            with open(os.path.join(belief_states_dir, file), "w") as f:
+            with open(belief_states_dir.joinpath(save_to_subdir, file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
 
 
-def parse_args():
-    parser = ArgumentParser()
-    parser.add_argument("-d", "--directory", required=True,
-                        help="Directory under which predicted belief states file for a given model checkpoint "
-                             "is located")
-    parser.add_argument("-s", "--schema", required=True,
-                        help="Path to schema.json file")
-    parser.add_argument("-t", "--template", required=True,
-                        help="Directory containing blank dialogue templates")
-    parser.add_argument("-j", "--json", required=True,
-                        help="Path to JSON file containing pre-processed test preprocessed_references")
-    return parser.parse_args()
+@click.command()
+@click.option("--quiet", "log_level", flag_value=logging.WARNING, default=True)
+@click.option("-v", "--verbose", "log_level", flag_value=logging.INFO)
+@click.option("-vv", "--very-verbose", "log_level", flag_value=logging.DEBUG)
+@click.option(
+    "-b",
+    "--belief_path",
+    "belief_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Absolute path to the directory containing the belief file to be decoded.",
+)
+@click.option(
+    "-s",
+    "--schema_path",
+    "schema_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Absolute path to the the schema of the split to be parsed",
+)
+@click.option(
+    "-templates",
+    "--dialogue_templates",
+    "dialogue_templates",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Absolute to the directory containing blank dialogue files for the split parsed.",
+)
+@click.option(
+    "-t",
+    "--test-data",
+    "test_path",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to pre-processed test data for which model predictions are to be parsed."
+         "Used to retrieve mappings from indices to slot/intent names which are required to"
+         "recover slot names from predicted indices",
+)
+def main(
+        belief_path: pathlib.Path,
+        schema_path: pathlib.Path,
+        dialogue_templates: pathlib.Path,
+        test_path: pathlib.Path,
+        log_level: int):
 
-
-def main():
-    args = parse_args()
     handlers = [
         logging.StreamHandler(sys.stdout),
         logging.StreamHandler(sys.stderr),
         logging.FileHandler(
-            '{}.log'.format(os.path.join(args.directory, "parse")),
+            f'{belief_path.joinpath("parse")}.log',
             mode='w',
         )
     ]
     logging.basicConfig(
         handlers=handlers,
-        level=logging.DEBUG,
+        level=log_level,
         datefmt="%Y-%m-%d %H:%M",
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    logger.setLevel(logging.DEBUG)
-    with open(args.schema, "r") as f:
+    logger.setLevel(log_level)
+    with open(schema_path, "r") as f:
         schema = json.load(f)
-    with open(args.json, "r") as f:
+    with open(test_path, "r") as f:
         preprocessed_refs = json.load(f)
-
-    for belief_states_file_dir, dirs, files in os.walk(args.directory):
-        for file in files:
-            if file == "belief_states.json":
-                # Copy templates over first
-                copy_tree(args.template, belief_states_file_dir)
-                logger.info(f"Parsing {belief_states_file_dir} directory.")
-                with open(os.path.join(belief_states_file_dir, file), "r") as f:
-                    predictions = json.load(f)
-                parse(schema, predictions, belief_states_file_dir, preprocessed_refs)
-
+    assert belief_path.joinpath("belief_states.json").exists(), "Could not find belief state files"
+    # Copy templates over first
+    copy_tree(str(dialogue_templates), str(belief_path))
+    logger.info(f"Parsing {belief_path} directory.")
+    with open(belief_path.joinpath("belief_states.json"), "r") as f:
+        predictions = json.load(f)
+    parse(schema, predictions, belief_path, preprocessed_refs["data"])
 
 if __name__ == '__main__':
     main()
