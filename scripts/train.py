@@ -24,7 +24,7 @@ from transformers import (
     T5Tokenizer,
     get_linear_schedule_with_warmup,
 )
-from torch.optim import AdamW
+from apex.optimizers import FusedAdam
 from src.dst.dataset import (
     TrainDataset,
     Vocabulary
@@ -340,7 +340,7 @@ def main(
             args.train,
             data_parallel=args.train.data_parallel
         )
-    optimizer = AdamW(
+    optimizer = FusedAdam(
         model.parameters(),
         lr=args.train.learning_rate,
         eps=args.train.adam_eps
