@@ -6,6 +6,7 @@ import re
 import sys
 from distutils.dir_util import copy_tree
 from pathlib import Path
+from typing import Union
 
 import click
 from omegaconf import OmegaConf
@@ -175,29 +176,20 @@ def populate_slots(
 def parse(
         schema: dict,
         predictions: dict,
-        belief_states_dir: pathlib.Path,
         preprocessed_references: dict,
-        save_to_subdir: str,
+        belief_states_dir: pathlib.Path,
+        output_dir: pathlib.Path
 ):
-    """
-    Parameters
-    ----------
-    save_to_subdir
-        Processed files saved to a subdirectory located in `belief_states_dir` directory.
-        Used to avoid overriding data during testing.
-    """
     with open(belief_states_dir.joinpath("experiment_config.yaml"), "r") as f:
         config = OmegaConf.load(f)
     model_name = config.decode.model_name_or_path
 
-    # save to a subdirectory, optionally
-    if save_to_subdir:
-        if not belief_states_dir.joinpath(save_to_subdir).exists():
-            belief_states_dir.joinpath(save_to_subdir).mkdir(exist_ok=True, parents=True)
+    if not output_dir.exists():
+        output_dir.mkdir(exist_ok=True, parents=True)
 
     # TODO: USE EXPERIMENT CONFIGURATION HERE TO RETRIEVE INFORMATION ABOUT PREPROCESSING
     pattern = re.compile(r"dialogues_[0-9]+\.json")
-    for file in belief_states_dir.iterdir():
+    for file in output_dir.iterdir():
         if pattern.match(file.name):
             logger.info(f"Parsing file {file}.")
             with open(file, "r") as f:
@@ -217,7 +209,7 @@ def parse(
                     model_name,
                     preprocessed_references[dialogue_id]
                     )
-            with open(belief_states_dir.joinpath(save_to_subdir, file.name), "w") as f:
+            with open(output_dir.joinpath(file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
 
 
@@ -234,12 +226,23 @@ def parse(
     help="Absolute path to the directory containing the belief file to be decoded.",
 )
 @click.option(
+    "-o",
+    "--output_dir",
+    "output_dir",
+    required=False,
+    type=click.Path(path_type=Path),
+    help="Absolute path to the directory where SGD-formatted dialogues containing predictions"
+         "as opposed to annotations are output. If not passed, the dialogues are saved in the "
+         "same directory as the parser input, (i.e., -b argument).",
+    default=None,
+)
+@click.option(
     "-s",
     "--schema_path",
     "schema_path",
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Absolute path to the the schema of the split to be parsed",
+    help="Absolute path to the the schema of the data to be parsed.",
 )
 @click.option(
     "-templates",
@@ -262,15 +265,23 @@ def parse(
 def main(
         belief_path: pathlib.Path,
         schema_path: pathlib.Path,
+        output_dir: Union[pathlib.Path, None],
         dialogue_templates: pathlib.Path,
         test_path: pathlib.Path,
         log_level: int):
+
+
+    if output_dir is None:
+        output_dir = belief_path
+    else:
+        if not output_dir.exists():
+            output_dir.mkdir(exist_ok=True, parents=True)
 
     handlers = [
         logging.StreamHandler(sys.stdout),
         logging.StreamHandler(sys.stderr),
         logging.FileHandler(
-            f'{belief_path.joinpath("parse")}.log',
+            f'{output_dir.joinpath("parse")}.log',
             mode='w',
         )
     ]
@@ -287,11 +298,11 @@ def main(
         preprocessed_refs = json.load(f)
     assert belief_path.joinpath("belief_states.json").exists(), "Could not find belief state files"
     # Copy templates over first
-    copy_tree(str(dialogue_templates), str(belief_path))
+    copy_tree(str(dialogue_templates), str(output_dir))
     logger.info(f"Parsing {belief_path} directory.")
     with open(belief_path.joinpath("belief_states.json"), "r") as f:
         predictions = json.load(f)
-    parse(schema, predictions, belief_path, preprocessed_refs["data"])
+    parse(schema, predictions, preprocessed_refs["data"], belief_path, output_dir)
 
 if __name__ == '__main__':
     main()
