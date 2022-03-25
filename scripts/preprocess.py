@@ -157,6 +157,7 @@ def has_alphanumeric_words(
         return True
     return False
 
+
 def value_in_utterance(
         values: List[str],
         system_utterance: str,
