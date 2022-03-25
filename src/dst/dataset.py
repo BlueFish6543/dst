@@ -31,7 +31,7 @@ class Vocabulary:
 
     def add_special_tokens(self, tokens: dict[str, str]):
         for token in tokens:
-            token = token.upper().strip()
+            token = token.strip()
             for value in self.special_tokens.values():
                 if token in value:
                     break
@@ -68,6 +68,7 @@ class DSTDataset(torch.utils.data.Dataset):
         self.eos_id = tokenizer.eos_token_id
         self.ignore_token_id = -100
         self.max_seq_len = args.max_seq_len
+        self.decoder_max_seq_len = args.decoder_max_seq_len
         self.examples = []
         self.seen_services = set(train_schema.services)  # type: set[str]
         inferred_splits = {infer_split_name_from_path(pth) for pth in data_paths}
@@ -97,7 +98,8 @@ class DSTDataset(torch.utils.data.Dataset):
 
 class TrainDataset(DSTDataset):
     def __init__(self, args: DictConfig, tokenizer, data_paths: list[str], data_size: int, train_schema: Schema):
-        self.over_length = 0
+        self.encoder_over_length = 0
+        self.decoder_over_length = 0
         super().__init__(args, tokenizer, data_paths, data_size, train_schema)
 
     def _create_examples(self):
@@ -138,7 +140,8 @@ class TrainDataset(DSTDataset):
                         )
 
         logger.info(f"Data statistics: {self.data_paths}: {len(self.examples)} examples")
-        logger.info(f"Number of over-length examples: {self.data_paths}: {self.over_length} examples")
+        logger.info(f"Number of input over-length examples: {self.data_paths}: {self.encoder_over_length} examples")
+        logger.info(f"Number of output over-length examples: {self.data_paths}: {self.decoder_over_length} examples")
         random.shuffle(self.examples)
         if self.data_size != -1:
             self.examples = self.examples[:self.data_size]
@@ -169,14 +172,19 @@ class TrainDataset(DSTDataset):
 
         if len(input_ids) > self.max_seq_len:
             # Handle over-length example
-            logger.warning(f"{dialogue_id}({turn_index}) exceeds maximum sequence length, truncating...")
-            self.over_length += 1
+            logger.warning(f"{dialogue_id}({turn_index}) input exceeds maximum sequence length, truncating...")
+            self.encoder_over_length += 1
             input_ids = input_ids[-self.max_seq_len:]
-            label_ids = label_ids[-self.max_seq_len:]
+        if len(label_ids) > self.decoder_max_seq_len:
+            logger.warning(f"{dialogue_id}({turn_index}) output exceeds maximum sequence length, truncating...")
+            label_ids = label_ids[-self.decoder_max_seq_len:]
         assert len(input_ids) <= self.max_seq_len
         seen_flag = 1
         if self.split != 'train':
-            seen_flag = 1 if service in self.seen_services else 0
+            if schema_variant_identifier == 'original':
+                seen_flag = 1 if service in self.seen_services else 0
+            else:
+                seen_flag = 1 if service[:-1] in self.seen_services else 0
         self.examples.append({
             'input_ids': input_ids,
             'label_ids': label_ids,
@@ -208,7 +216,7 @@ class TrainDataset(DSTDataset):
 class TestDataset(DSTDataset):
     def __init__(self, args: DictConfig, tokenizer, data_paths: list[str], data_size: int, train_schema: Schema):
         self.to_decode: set[str] = set(args.decode_only)
-        self.over_length = 0
+        self.encoder_over_length = 0
         super().__init__(args, tokenizer, data_paths, data_size, train_schema)
 
 
@@ -270,14 +278,18 @@ class TestDataset(DSTDataset):
         else:
             raise ValueError("Unsupported model.")
         if len(dst_input_ids) > self.max_seq_len:
-            self.over_length += 1
+            self.encoder_over_length += 1
             dst_input_ids = dst_input_ids[-self.max_seq_len:]
+        if schema_variant_identifier == 'original':
+            seen_flag = 1 if service in self.seen_services else 0
+        else:
+            seen_flag = 1 if service[:-1] in self.seen_services else 0
         self.examples.append({
             'input_ids': dst_input_ids,
             'example_id': f"{schema_variant_identifier}_{dialogue_id}_{turn_index}",
             'user_utterance': user_utterance,
             'service': service,
-            'seen': 1 if service in self.seen_services else 0
+            'seen': seen_flag
         })
 
     def collate_fn(self, batch):
