@@ -3,7 +3,7 @@ import logging
 import pathlib
 import re
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def populate_slots(
                     raise AssertionError
             if "<EOS>" not in predicted_str:
                 logger.warning(f"No <EOS> token in {dialogue_id}_{turn_index}. Skipping.")
-                continue
+                raise ValueError
 
             # Extract string between <BOS> and <EOS>
             if 'gpt2' in model_name.lower():
@@ -171,12 +171,11 @@ def parse(
         schema: dict,
         predictions: dict,
         preprocessed_references: dict,
-        belief_states_dir: pathlib.Path,
-        output_dir: pathlib.Path
+        output_dir: pathlib.Path,
+        experiment_config: DictConfig
 ):
-    with open(belief_states_dir.joinpath("experiment_config.yaml"), "r") as f:
-        config = OmegaConf.load(f)
-    model_name = config.decode.model_name_or_path
+
+    model_name = experiment_config.decode.model_name_or_path
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)

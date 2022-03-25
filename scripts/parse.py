@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Union
 
 import click
+from omegaconf import OmegaConf
 
 from dst.parser import parse
 
@@ -77,6 +78,9 @@ def main(
         if not output_dir.exists():
             output_dir.mkdir(exist_ok=True, parents=True)
 
+    with open(belief_path.joinpath("experiment_config.yaml"), "r") as f:
+        experiment_config = OmegaConf.load(f)
+
     handlers = [
         logging.StreamHandler(sys.stdout),
         logging.StreamHandler(sys.stderr),
@@ -102,7 +106,7 @@ def main(
     logger.info(f"Parsing {belief_path} directory.")
     with open(belief_path.joinpath("belief_states.json"), "r") as f:
         predictions = json.load(f)
-    parse(schema, predictions, preprocessed_refs["data"], belief_path, output_dir)
+    parse(schema, predictions, preprocessed_refs["data"], output_dir, experiment_config)
 
 if __name__ == '__main__':
     main()
