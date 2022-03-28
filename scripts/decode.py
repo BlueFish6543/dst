@@ -113,7 +113,7 @@ def decode(args, batch, model, tokenizer):
         if args.generate_api == 'huggingface':
             output = model.generate(
                 input_ids.to(DEVICE),
-                max_length=(ctx_len + args.max_len),
+                max_length=args.decoder_max_seq_len,
                 do_sample=False,
                 temperature=args.temperature,
                 use_cache=True,
