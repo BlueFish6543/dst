@@ -394,6 +394,7 @@ def main(
         model_config = OmegaConf.load(checkpoint.parent.joinpath("model_config.yaml"))
         config_data_version = model_config.data.version
         inferred_checkpoint_data_version = infer_data_version_from_path(str(checkpoint))
+        inferred_checkpoint_data_version = int(inferred_checkpoint_data_version.split("_")[1])
         data_versions = [inferred_checkpoint_data_version, config_data_version, test_data_version]
         if len(set(data_versions)) != 1:
             logger.error(
