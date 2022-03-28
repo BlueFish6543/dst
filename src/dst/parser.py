@@ -2,8 +2,9 @@ import json
 import logging
 import pathlib
 import re
+from typing import Optional
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ def parse_predicted_string(
         slot_mapping: dict,
         cat_values_mapping: dict,
         intent_mapping: dict,
-        context: str
-) -> dict:
+        context: str,
+        value_separator: Optional[str]=None) -> dict:
 
     state = {
         "slot_values": {},
@@ -62,23 +63,33 @@ def parse_predicted_string(
                     # Non-categorical
                     # Check if the next slot could potentially be part of the current slot
                     value = pair[1]
-                    # TODO: DEPENDING ON INPUT PREPROCESSING SPLIT MULTIPLE VALUES HERE
+                    if value_separator is not None and value_separator in value:
+                        value_list = value.split(value_separator)
+                        value_list = [v.strip() for v in value_list]
+                    else:
+                        value_list = [value.strip()]
                     j = i + 1
                     # TODO: COULD THIS ALSO BE FUZZY MATCH? CHECK OUTPUTS TO FIND OUT!
                     while j < len(substrings):
                         # Check if the combined string exists in the context
-                        if (value + substrings[j]).replace(" ", "").lower() not in context.replace(" ", "").lower():
+                        for idx, value in enumerate(value_list):
                             # Replace spaces to avoid issues with whitespace
+                            if (value + substrings[j]).replace(" ", "").lower() not in context.replace(" ", "").lower():
+                                continue
+                            else:
+                                value_list[idx] += " " + substrings[j]
+                                skip += 1
+                                break
+                        else:
                             break
-                        value += " " + substrings[j]
-                        skip += 1  # skip the next iteration through substring as it was part of the current slot
-                    state["slot_values"][slot] = [value.strip()]
-                    if value.replace(" ", "").lower() not in context.replace(" ", "").lower():
-                        # Replace spaces to avoid issues with whitespace
-                        logger.warning(
-                            f"Predicted value {value.strip()} for slot {pair[0].strip()} "
-                           f"not in context in {dialogue_id}_{turn_index}."
-                        )
+                    state["slot_values"][slot] = value_list
+                    for value in value_list:
+                        if value.replace(" ", "").lower() not in context.replace(" ", "").lower():
+                            # Replace spaces to avoid issues with whitespace
+                            logger.warning(
+                                f"Predicted value {value.strip()} for slot {pair[0].strip()} "
+                               f"not in context in {dialogue_id}_{turn_index}."
+                            )
             except KeyError:
                 logger.warning(
                     f"Could not extract slot {pair[0].strip()} in {predicted_str} in {dialogue_id}_{turn_index}.")
@@ -109,7 +120,8 @@ def populate_slots(
         dialogue_id: str,
         schema: dict,
         model_name: str,
-        preprocessed_references: dict
+        preprocessed_references: dict,
+        value_separator: Optional[str] = None,
 ):
     context = ""
     for turn_index in predicted_data:
@@ -160,7 +172,9 @@ def populate_slots(
                 ref_proc_turn["frames"][service_name]["slot_mapping"],
                 ref_proc_turn["frames"][service_name]["cat_values_mapping"],
                 ref_proc_turn["frames"][service_name]["intent_mapping"],
-                context
+                context,
+                value_separator=value_separator,
+
             )
             # Update
             empty_ref_frame_state = empty_ref_frame["state"]
@@ -176,11 +190,18 @@ def parse(
 ):
 
     model_name = experiment_config.decode.model_name_or_path
+    try:
+        data_processing_config = experiment_config.data.preprocessing
+    except AttributeError:
+        data_processing_config = OmegaConf.create()
+    try:
+        value_separator = data_processing_config.value_selection.separator
+    except AttributeError:
+        value_separator = None
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
 
-    # TODO: USE EXPERIMENT CONFIGURATION HERE TO RETRIEVE INFORMATION ABOUT PREPROCESSING
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
@@ -200,7 +221,8 @@ def parse(
                     dialogue_id,
                     schema,
                     model_name,
-                    preprocessed_references[dialogue_id]
+                    preprocessed_references[dialogue_id],
+                    value_separator=value_separator
                     )
             with open(output_dir.joinpath(file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
