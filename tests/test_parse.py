@@ -93,7 +93,7 @@ def get_metrics_inputs(hyp_path: pathlib.Path, ref_path: pathlib.Path):
 
 MODEL_INPUT_DATA_VERSION = ['version_1']
 VARIANTS = ['original', 'v1', 'v2', 'v3', 'v4', 'v5']
-SPLITS = ['dev']
+SPLITS = ['train', 'dev', 'test']
 
 @pytest.mark.parametrize("setup_tmp_directories", [ROOT_TEST_OUTPUTS, ], indirect=True)
 @pytest.mark.parametrize("model_name_or_path", ['google/t5-v1_1-base', ], ids="model_name_or_path={}".format)
