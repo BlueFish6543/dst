@@ -259,7 +259,7 @@ class TestDataset(DSTDataset):
                     )
 
         logger.info(f"Data statistics: {self.data_paths}: {len(self.examples)} examples")
-        logger.info(f"Number of over-length examples: {self.data_paths}: {self.over_length} examples")
+        logger.info(f"Number of input over-length examples: {self.data_paths}: {self.encoder_over_length} examples")
 
     def create_ids(
             self,
