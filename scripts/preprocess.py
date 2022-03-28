@@ -119,7 +119,7 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "RentalCars_32": ["car_type"] + ['auto_type'],
     "RentalCars_33": ["car_type"] + ["vehicle_type"],
     "RentalCars_34": ["car_type"] + ["type_of_car"] ,
-    "RentalCars_35": ["car_type"] + ["model_of_car"],
+    "RentalCars_35": ["car_type"] + ["hatchback_sedan_or_suv"],
     "Restaurants_1": ["price_range"],
     "Restaurants_11": ["price_range"],
     "Restaurants_12": ["price_range"],
