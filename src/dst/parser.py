@@ -8,6 +8,112 @@ from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
+lower_to_schema_case = {
+    'true': 'True',
+    'false': 'False',
+    'economy': 'Economy',
+    'economy extra': 'Economy extra',
+    'flexible': 'Flexible',
+    'music': 'Music',
+    'sports': 'Sports',
+    'premium economy': "Premium Economy",
+    'business': "Business",
+    'first class': "First Class",
+    "united airlines": "United Airlines",
+    "american airlines": "American Airlines",
+    "delta airlines": "Delta Airlines",
+    "southwest airlines": "Southwest Airlines",
+    "alaska airlines": "Alaska Airlines",
+    "british airlines": "British Airways",
+    "air canada": "Air Canada",
+    "air france": "Air France",
+    "tv": {
+        'Music_1': 'TV',
+        'Music_11': 'TV',
+        'Music_12': 'TV',
+        'Music_13': 'TV',
+        'Music_14': 'TV',
+        'Music_15': 'TV',
+        'Music_2': 'TV',
+        'Music_21': 'TV',
+        'Music_22': 'TV',
+        'Music_23': 'TV',
+        'Music_24': 'TV',
+        'Music_25': 'TV',
+    },
+    "kitchen speaker": {
+        'Music_1': 'Kitchen speaker',
+        'Music_11': 'Kitchen speaker',
+        'Music_12': 'Kitchen speaker',
+        'Music_13': 'Kitchen speaker',
+        'Music_14': 'Kitchen speaker',
+        'Music_15': 'Kitchen speaker',
+        'Music_2': 'kitchen speaker',
+        'Music_21': 'kitchen speaker',
+        'Music_22': 'kitchen speaker',
+        'Music_23': 'kitchen speaker',
+        'Music_24': 'kitchen speaker',
+        'Music_25': 'kitchen speaker',
+    },
+    "bedroom_speaker": {
+        'Music_1': "Bedroom speaker",
+        'Music_11': "Bedroom speaker",
+        'Music_12': "Bedroom speaker",
+        'Music_13': "Bedroom speaker",
+        'Music_14': "Bedroom speaker",
+        'Music_15': "Bedroom speaker",
+        'Music_2': "bedroom speaker",
+        'Music_21': "bedroom speaker",
+        'Music_22': "bedroom speaker",
+        'Music_23': "bedroom speaker",
+        'Music_24': "bedroom speaker",
+        'Music_25': "bedroom speaker",
+    },
+    "compact": "Compact",
+    "standard": "Standard",
+    "full-size": "Full-size",
+    "pool": "Pool",
+    "regular": "Regular",
+    "luxury": "Luxury",
+    "gynecologist": "Gynecologist",
+    "ent specialist": "ENT Specialist",
+    "ophthalmologist": "Ophthalmologist",
+    "general practitioner": "General Practitioner",
+    "dermatologist": "Dermatologist",
+    "place of worship": "Place of Worship",
+    "theme park": "Theme Park",
+    "museum": "Museum",
+    "historical landmark": "Historical Landmark",
+    "park": "Park",
+    "tourist attraction": "Tourist Attraction",
+    "sports venue": "Sports Venue",
+    "shopping area": "Shopping Area",
+    "performing arts venue": "Performing Arts Venue",
+    "nature preserve": "Nature Preserve",
+    "none": 'None',
+    "english": "English",
+    "mandarin": "Mandarin",
+    "spanish": "Spanish",
+    "psychologist": "Psychologist",
+    "family counselor": "Family Counselor",
+    "psychiatrist": "Psychiatrist",
+    "theater": "Theater",
+    "south african airways": "South African Airways",
+    "lot polish airlines": "LOT Polish Airlines",
+    "latam brasil": "LATAM Brasil",
+    "hindi": "Hindi",
+    "french": "French",
+    "living room": "Living room",
+    "kitchen": "Kitchen",
+    "patio": "Patio",
+    "hatchback": "Hatchback",
+    "sedan": "Sedan",
+    "suv": "SUV",
+    "value": "Value",
+
+    #
+}
+
 
 def parse_predicted_string(
         dialogue_id: str,
@@ -17,8 +123,9 @@ def parse_predicted_string(
         cat_values_mapping: dict,
         intent_mapping: dict,
         context: str,
-        value_separator: Optional[str]=None) -> dict:
-
+        value_separator: Optional[str] = None,
+        restore_categorical_case: bool = False
+) -> dict:
     state = {
         "slot_values": {},
         "active_intent": "NONE",
@@ -88,7 +195,7 @@ def parse_predicted_string(
                             # Replace spaces to avoid issues with whitespace
                             logger.warning(
                                 f"Predicted value {value.strip()} for slot {pair[0].strip()} "
-                               f"not in context in {dialogue_id}_{turn_index}."
+                                f"not in context in {dialogue_id}_{turn_index}."
                             )
             except KeyError:
                 logger.warning(
@@ -188,7 +295,6 @@ def parse(
         output_dir: pathlib.Path,
         experiment_config: DictConfig
 ):
-
     model_name = experiment_config.decode.model_name_or_path
     try:
         data_processing_config = experiment_config.data.preprocessing
@@ -223,6 +329,6 @@ def parse(
                     model_name,
                     preprocessed_references[dialogue_id],
                     value_separator=value_separator
-                    )
+                )
             with open(output_dir.joinpath(file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
