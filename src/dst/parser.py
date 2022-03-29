@@ -1,3 +1,4 @@
+import functools
 import json
 import logging
 import pathlib
@@ -110,14 +111,24 @@ lower_to_schema_case = {
     "sedan": "Sedan",
     "suv": "SUV",
     "value": "Value",
-
-    #
 }
 
+
+def restore_case(value: str, service: str, restore_categorical_case: bool = True) -> str:
+    if not restore_categorical_case:
+        return value
+    if value in lower_to_schema_case:
+        recased_data = lower_to_schema_case[value]
+        if isinstance(recased_data, str):
+            return recased_data
+        else:
+            assert isinstance(recased_data, dict)
+            return recased_data[service]
 
 def parse_predicted_string(
         dialogue_id: str,
         turn_index: str,
+        service: str,
         predicted_str: str,
         slot_mapping: dict,
         cat_values_mapping: dict,
@@ -126,11 +137,13 @@ def parse_predicted_string(
         value_separator: Optional[str] = None,
         restore_categorical_case: bool = False
 ) -> dict:
+
     state = {
         "slot_values": {},
         "active_intent": "NONE",
         "requested_slots": []
     }
+    recase = functools.partial(restore_case, restore_categorical_case=restore_categorical_case)
     # Expect [states] 0:value 1:1a ... [intents] i1 [req_slots] 2 ...
     match = re.search(r"\[states](.*)\[intents](.*)\[req_slots](.*)", predicted_str)
     if match is None:
@@ -157,15 +170,18 @@ def parse_predicted_string(
                     # Categorical
                     success = False
                     # Invert the mapping to get the categorical value
-                    for key, value in cat_values_mapping[slot].items():
-                        if value == pair[1].strip():
-                            state["slot_values"][slot] = [key]
+                    for categorical_value, categorical_value_idx in cat_values_mapping[slot].items():
+                        if categorical_value_idx == pair[1].strip():
+                            recased_value = recase(value=categorical_value, service=service)
+                            state["slot_values"][slot] = [recased_value]
                             success = True
                             break
                     if not success:
                         logger.warning(
                             f"Could not extract categorical value for slot {pair[0].strip()} in "
-                            f"{predicted_str} in {dialogue_id}_{turn_index}.")
+                            f"{predicted_str} in {dialogue_id}_{turn_index}. "
+                            f"Values defined for this slot were {cat_values_mapping[slot]}"
+                        )
                 else:
                     # Non-categorical
                     # Check if the next slot could potentially be part of the current slot
@@ -229,6 +245,7 @@ def populate_slots(
         model_name: str,
         preprocessed_references: dict,
         value_separator: Optional[str] = None,
+        restore_categorical_case: bool = False
 ):
     context = ""
     for turn_index in predicted_data:
@@ -275,13 +292,12 @@ def populate_slots(
                 raise ValueError("Unsupported model.")
 
             state = parse_predicted_string(
-                dialogue_id, turn_index, predicted_str,
+                dialogue_id, turn_index, service_name, predicted_str,
                 ref_proc_turn["frames"][service_name]["slot_mapping"],
                 ref_proc_turn["frames"][service_name]["cat_values_mapping"],
-                ref_proc_turn["frames"][service_name]["intent_mapping"],
-                context,
+                ref_proc_turn["frames"][service_name]["intent_mapping"], context,
                 value_separator=value_separator,
-
+                restore_categorical_case=restore_categorical_case
             )
             # Update
             empty_ref_frame_state = empty_ref_frame["state"]
@@ -304,6 +320,10 @@ def parse(
         value_separator = data_processing_config.value_selection.separator
     except AttributeError:
         value_separator = None
+    try:
+        recase_categorical_values = data_processing_config.lowercase_model_targets
+    except AttributeError:
+        recase_categorical_values = False
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
@@ -328,7 +348,8 @@ def parse(
                     schema,
                     model_name,
                     preprocessed_references[dialogue_id],
-                    value_separator=value_separator
+                    value_separator=value_separator,
+                    restore_categorical_case=recase_categorical_values
                 )
             with open(output_dir.joinpath(file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
