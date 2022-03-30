@@ -203,6 +203,33 @@ def parse_predicted_string(
     return state
 
 
+def parse_categorical_slot(
+        state: dict,
+        dialogue_id: str,
+        turn_index: str,
+        service: str,
+        slot: str,
+        slot_value_pair: list[str, str],
+        predicted_str: str,
+        cat_values_mapping: dict,
+        restore_categorical_case: bool = False
+):
+    # Categorical
+    recase = functools.partial(restore_case, restore_categorical_case=restore_categorical_case)
+    # Invert the mapping to get the categorical value
+    for categorical_value, categorical_value_idx in cat_values_mapping[slot].items():
+        if categorical_value_idx == slot_value_pair[1].strip():
+            recased_value = recase(value=categorical_value, service=service)
+            assert isinstance(recased_value, str)
+            state["slot_values"][slot] = [recased_value]
+            break
+    else:
+        logger.warning(
+            f"Could not extract categorical value for slot {slot_value_pair[0].strip()} in "
+            f"{predicted_str} in {dialogue_id}_{turn_index}. "
+            f"Values defined for this slot were {cat_values_mapping[slot]}"
+        )
+
 def parse_with_context(
         state: dict,
         substrings: list[str],
@@ -228,7 +255,6 @@ def parse_with_context(
             "Parser algorithm is not correct for when multiple values are in the target sequence."
             "Use at your own risk!"
         )
-    recase = functools.partial(restore_case, restore_categorical_case=restore_categorical_case)
     skip = 0
     for i, pair in enumerate(substrings):
         if skip > 0:
@@ -242,22 +268,17 @@ def parse_with_context(
         try:
             slot = slot_mapping[pair[0].strip()]
             if slot in cat_values_mapping:
-                # Categorical
-                success = False
-                # Invert the mapping to get the categorical value
-                for categorical_value, categorical_value_idx in cat_values_mapping[slot].items():
-                    if categorical_value_idx == pair[1].strip():
-                        recased_value = recase(value=categorical_value, service=service)
-                        assert isinstance(recased_value, str)
-                        state["slot_values"][slot] = [recased_value]
-                        success = True
-                        break
-                if not success:
-                    logger.warning(
-                        f"Could not extract categorical value for slot {pair[0].strip()} in "
-                        f"{predicted_str} in {dialogue_id}_{turn_index}. "
-                        f"Values defined for this slot were {cat_values_mapping[slot]}"
-                    )
+                parse_categorical_slot(
+                    state,
+                    dialogue_id,
+                    turn_index,
+                    service,
+                    slot,
+                    pair,
+                    predicted_str,
+                    cat_values_mapping,
+                    restore_categorical_case=restore_categorical_case
+                )
             else:
                 # Non-categorical
                 # Check if the next slot could potentially be part of the current slot
@@ -299,6 +320,24 @@ def parse_with_context(
         except KeyError:
             logger.warning(
                 f"Could not extract slot {pair[0].strip()} in {predicted_str} in {dialogue_id}_{turn_index}.")
+
+
+def parse_without_context(
+        state: dict,
+        substrings: list[str],
+        dialogue_id: str,
+        turn_index: str,
+        service: str,
+        predicted_str: str,
+        slot_mapping: dict,
+        cat_values_mapping: dict,
+        context: str,
+        value_separator: Optional[str] = None,
+        restore_categorical_case: bool = False,
+        target_slot_index_separator: Optional[str] = ":"
+):
+    recase = functools.partial(restore_case, restore_categorical_case=restore_categorical_case)
+    raise NotImplementedError
 
 
 def populate_slots(
