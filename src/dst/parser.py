@@ -129,11 +129,6 @@ def restore_case(value: str, service: str, restore_categorical_case: bool = True
             return recased_data[service]
 
 
-def get_slot_index_pattern(target_indices: list[int]) -> str:
-    assert not any(el > 16 for el in target_indices)
-    return "|".join([str(el) for el in target_indices])
-
-
 def parse_predicted_string(dialogue_id: str, turn_index: str, service: str, predicted_str: str, slot_mapping: dict,
                            cat_values_mapping: dict, intent_mapping: dict, context: str,
                            value_separator: Optional[str] = None, restore_categorical_case: bool = False) -> dict:
@@ -151,15 +146,13 @@ def parse_predicted_string(dialogue_id: str, turn_index: str, service: str, pred
         logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{turn_index}.")
         return state
 
-    # slot_index_pattern = get_slot_index_pattern(target_indices)
     # Parse slot values
     if match.group(1).strip():  # if the string is not empty
-        # assert slot_index_pattern and slot_index_pattern[-1] != "|"
         pattern = r"(?<!^)\s+(?=[0-9]+:)"
-        # pattern = rf"(?<!^)\s+(?=(?:{slot_index_pattern}):)"
         if value_separator == " || ":
             pattern = r"(?<!^)\s+(?=[0-9]+:)(?<!\|\| )"
-            # pattern = fr"(?<!^)\s+(?=(?:{slot_index_pattern}):)(?<!\|\| )"
+        elif value_separator is not None:
+            logger.error(f"State splitting pattern undefined for value separator {value_separator}")
         substrings = re.compile(pattern).split(match.group(1).strip())
         skip = 0
         for i, pair in enumerate(substrings):
