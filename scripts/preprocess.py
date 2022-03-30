@@ -240,7 +240,7 @@ def concatenate_values(values: list[str], shuffle: bool = True, separator: str =
     return f"{separator}".join(values)
 
 
-def process_frame(
+def linearize_targets(
         frame: dict,
         turn_info: dict,
         previous_slots: dict,
@@ -270,6 +270,7 @@ def process_frame(
     # Slot values
     slot_mapping = turn_info[service]["slot_mapping"]
     cat_values_mapping = turn_info[service]["cat_values_mapping"]
+    this_service_expected_indices = []
     for i in range(len(slot_mapping) // 2):
         slot = slot_mapping[i]
         if slot not in ALPHA_NUMERIC_SLOT_EXCEPTIONS:
@@ -277,14 +278,12 @@ def process_frame(
         if slot in current_slots:
             # Active
             if slot in cat_values_mapping:
-                try:
-                    targets += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
-                except KeyError:
-                    print("slot", service, slot)
-                    raise KeyError
+                targets += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
             else:
                 # Non-categorical
                 targets += f"{i}:{current_slots[slot]} "
+            this_service_expected_indices.append(i)
+    turn_info[service]["target_slot_indices"] = this_service_expected_indices
 
     # Active intent
     targets += "[intents] "
@@ -386,7 +385,7 @@ def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) ->
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
                     # Each frame represents one service
-                    process_frame(
+                    linearize_targets(
                         frame,
                         turn_info,
                         previous_slots,
