@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import json
 import logging
@@ -9,6 +11,7 @@ from omegaconf import DictConfig, OmegaConf
 
 logger = logging.getLogger(__name__)
 
+SPECIAL_VALUES = {'dontcare'}
 lower_to_schema_case = {
     'true': 'True',
     'false': 'False',
@@ -115,7 +118,7 @@ lower_to_schema_case = {
 
 
 def restore_case(value: str, service: str, restore_categorical_case: bool = True) -> str:
-    if not restore_categorical_case:
+    if not restore_categorical_case or value not in lower_to_schema_case:
         return value
     if value in lower_to_schema_case:
         recased_data = lower_to_schema_case[value]
@@ -125,18 +128,15 @@ def restore_case(value: str, service: str, restore_categorical_case: bool = True
             assert isinstance(recased_data, dict)
             return recased_data[service]
 
-def parse_predicted_string(
-        dialogue_id: str,
-        turn_index: str,
-        service: str,
-        predicted_str: str,
-        slot_mapping: dict,
-        cat_values_mapping: dict,
-        intent_mapping: dict,
-        context: str,
-        value_separator: Optional[str] = None,
-        restore_categorical_case: bool = False
-) -> dict:
+
+def get_slot_index_pattern(target_indices: list[int]) -> str:
+    assert not any(el > 16 for el in target_indices)
+    return "|".join([str(el) for el in target_indices])
+
+
+def parse_predicted_string(dialogue_id: str, turn_index: str, service: str, predicted_str: str, slot_mapping: dict,
+                           cat_values_mapping: dict, intent_mapping: dict, context: str,
+                           value_separator: Optional[str] = None, restore_categorical_case: bool = False) -> dict:
 
     state = {
         "slot_values": {},
@@ -151,9 +151,16 @@ def parse_predicted_string(
         logger.warning(f"Could not parse predicted string {predicted_str} in {dialogue_id}_{turn_index}.")
         return state
 
+    # slot_index_pattern = get_slot_index_pattern(target_indices)
     # Parse slot values
     if match.group(1).strip():  # if the string is not empty
-        substrings = re.compile(r"(?<!^)\s+(?=[0-9]+:)").split(match.group(1).strip())
+        # assert slot_index_pattern and slot_index_pattern[-1] != "|"
+        pattern = r"(?<!^)\s+(?=[0-9]+:)"
+        # pattern = rf"(?<!^)\s+(?=(?:{slot_index_pattern}):)"
+        if value_separator == " || ":
+            pattern = r"(?<!^)\s+(?=[0-9]+:)(?<!\|\| )"
+            # pattern = fr"(?<!^)\s+(?=(?:{slot_index_pattern}):)(?<!\|\| )"
+        substrings = re.compile(pattern).split(match.group(1).strip())
         skip = 0
         for i, pair in enumerate(substrings):
             if skip > 0:
@@ -173,6 +180,7 @@ def parse_predicted_string(
                     for categorical_value, categorical_value_idx in cat_values_mapping[slot].items():
                         if categorical_value_idx == pair[1].strip():
                             recased_value = recase(value=categorical_value, service=service)
+                            assert isinstance(recased_value, str)
                             state["slot_values"][slot] = [recased_value]
                             success = True
                             break
@@ -192,27 +200,34 @@ def parse_predicted_string(
                     else:
                         value_list = [value.strip()]
                     j = i + 1
-                    # TODO: COULD THIS ALSO BE FUZZY MATCH? CHECK OUTPUTS TO FIND OUT!
                     while j < len(substrings):
                         # Check if the combined string exists in the context
                         for idx, value in enumerate(value_list):
-                            # Replace spaces to avoid issues with whitespace
-                            if (value + substrings[j]).replace(" ", "").lower() not in context.replace(" ", "").lower():
-                                continue
+                            if value_separator is None:
+                                possible_continuations = [substrings[j]]
+                            elif value_separator in substrings[j]:
+                                possible_continuations = substrings[j].split(value_separator)
                             else:
-                                value_list[idx] += " " + substrings[j]
-                                skip += 1
-                                break
+                                possible_continuations = [substrings[j]]
+                            for continuation in possible_continuations:
+                                # Replace spaces to avoid issues with whitespace
+                                if (value + continuation).replace(" ", "").lower() not in context.replace(" ", "").lower():
+                                    continue
+                                else:
+                                    value_list[idx] += " " + continuation
+                                    skip += 1
+                                    break
                         else:
                             break
                     state["slot_values"][slot] = value_list
                     for value in value_list:
                         if value.replace(" ", "").lower() not in context.replace(" ", "").lower():
                             # Replace spaces to avoid issues with whitespace
-                            logger.warning(
-                                f"Predicted value {value.strip()} for slot {pair[0].strip()} "
-                                f"not in context in {dialogue_id}_{turn_index}."
-                            )
+                            if value.strip() not in SPECIAL_VALUES:
+                                logger.warning(
+                                    f"Predicted value {value.strip()} for slot {pair[0].strip()} "
+                                    f"not in context in {dialogue_id}_{turn_index}."
+                                )
             except KeyError:
                 logger.warning(
                     f"Could not extract slot {pair[0].strip()} in {predicted_str} in {dialogue_id}_{turn_index}.")
@@ -291,14 +306,12 @@ def populate_slots(
             else:
                 raise ValueError("Unsupported model.")
 
-            state = parse_predicted_string(
-                dialogue_id, turn_index, service_name, predicted_str,
-                ref_proc_turn["frames"][service_name]["slot_mapping"],
-                ref_proc_turn["frames"][service_name]["cat_values_mapping"],
-                ref_proc_turn["frames"][service_name]["intent_mapping"], context,
-                value_separator=value_separator,
-                restore_categorical_case=restore_categorical_case
-            )
+            state = parse_predicted_string(dialogue_id, turn_index, service_name, predicted_str,
+                                           ref_proc_turn["frames"][service_name]["slot_mapping"],
+                                           ref_proc_turn["frames"][service_name]["cat_values_mapping"],
+                                           ref_proc_turn["frames"][service_name]["intent_mapping"],
+                                           context, value_separator=value_separator,
+                                           restore_categorical_case=restore_categorical_case)
             # Update
             empty_ref_frame_state = empty_ref_frame["state"]
             empty_ref_frame_state.update(state)
@@ -317,7 +330,7 @@ def parse(
     except AttributeError:
         data_processing_config = OmegaConf.create()
     try:
-        value_separator = data_processing_config.value_selection.separator
+        value_separator = data_processing_config.value_selection.value_separator
     except AttributeError:
         value_separator = None
     try:
