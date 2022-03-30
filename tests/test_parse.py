@@ -93,7 +93,7 @@ def get_metrics_inputs(hyp_path: pathlib.Path, ref_path: pathlib.Path):
     return data
 
 
-MODEL_INPUT_DATA_VERSION = ['version_1']
+MODEL_INPUT_DATA_VERSION = ['version_5']
 VARIANTS = ['original', 'v1', 'v2', 'v3', 'v4', 'v5']
 # VARIANTS= ['original']
 SPLITS = ['train', 'dev', 'test']
@@ -157,24 +157,13 @@ def test_parse(setup_tmp_directories, split: str, variant: str, model_input_data
                         ref_slot_values = ref_frame["state"]["slot_values"][ref_slot]
                         hyp_slot_values = hyp_frame["state"]["slot_values"][ref_slot]
                         if model_input_data_version == 'version_1':
-                            try:
-                                assert set(hyp_slot_values).issubset(ref_slot_values)
-                            except AssertionError:
-                                print()
-                                raise AssertionError
+                            assert set(hyp_slot_values).issubset(ref_slot_values)
                         else:
                             if ref_slot in schema.get_service_schema(ref_frame["service"]).all_categorical_slots:
-                                try:
-                                    assert sorted(hyp_slot_values) == sorted(ref_slot_values)
-                                except AssertionError:
-                                    print()
-                                    print(ref_dialogue["dialogue_id"], ref_turn)
-                                    print(ref_dialogue["dialogue_id"], hyp_turn)
-                                    raise AssertionError
+                                assert sorted(hyp_slot_values) == sorted(ref_slot_values)
                             else:
                                 lowercased_refs = [r.lower() for r in ref_slot_values]
-                                try:
+                                if model_input_data_version == 'version_5':
+                                    assert sorted(hyp_slot_values) == sorted(lowercased_refs)
+                                else:
                                     assert set(sorted(hyp_slot_values)).issubset(sorted(lowercased_refs))
-                                except AssertionError:
-                                    print(ref_dialogue["dialogue_id"], ref_turn)
-                                    raise AssertionError
