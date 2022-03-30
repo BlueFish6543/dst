@@ -12,6 +12,12 @@ from omegaconf import DictConfig, OmegaConf
 logger = logging.getLogger(__name__)
 
 SPECIAL_VALUES = {'dontcare'}
+KNOWN_TARGET_INDEX_SEPARATORS = {"=>"}
+"""Separators which do not result in sequences with multiple parses.
+Used to call a parsing algorithm which does not use context to handle
+ambiguous parses.
+"""
+
 lower_to_schema_case = {
     'true': 'True',
     'false': 'False',
@@ -77,7 +83,27 @@ lower_to_schema_case = {
     "standard": "Standard",
     "full-size": "Full-size",
     "pool": "Pool",
-    "regular": "Regular",
+    "regular": {
+        "RideSharing_1": "Regular",
+        "RideSharing_11": "Regular",
+        "RideSharing_12": "Regular",
+        "RideSharing_13": "Regular",
+        "RideSharing_14": "Regular",
+        "RideSharing_15": "Regular",
+        "RideSharing_2": "Regular",
+        "RideSharing_21": "Regular",
+        "RideSharing_22": "Regular",
+        "RideSharing_23": "Regular",
+        "RideSharing_24": "Regular",
+        "RideSharing_25": "Regular",
+        "Movies_1": "regular",
+        "Movies_11": "regular",
+        "Movies_12": "regular",
+        "Movies_13": "regular",
+        "Movies_14": "regular",
+        "Movies_15": "regular",
+
+    },
     "luxury": "Luxury",
     "gynecologist": "Gynecologist",
     "ent specialist": "ENT Specialist",
@@ -140,7 +166,7 @@ def parse_predicted_string(
         context: str,
         value_separator: Optional[str] = None,
         restore_categorical_case: bool = False,
-        target_slot_index_separator: Optional[str] = ":"
+        target_slot_index_separator: str = ":"
 ) -> dict:
 
     state = {
@@ -148,7 +174,6 @@ def parse_predicted_string(
         "active_intent": "NONE",
         "requested_slots": []
     }
-    recase = functools.partial(restore_case, restore_categorical_case=restore_categorical_case)
     # Expect [states] 0:value 1:1a ... [intents] i1 [req_slots] 2 ...
     match = re.search(r"\[states](.*)\[intents](.*)\[req_slots](.*)", predicted_str)
     if match is None:
@@ -180,9 +205,23 @@ def parse_predicted_string(
                 restore_categorical_case=restore_categorical_case,
                 target_slot_index_separator=target_slot_index_separator,
             )
+        elif target_slot_index_separator in KNOWN_TARGET_INDEX_SEPARATORS:
+            parse_without_context(
+                state,
+                substrings,
+                dialogue_id,
+                turn_index,
+                service,
+                predicted_str,
+                slot_mapping,
+                cat_values_mapping,
+                context,
+                value_separator=value_separator,
+                restore_categorical_case=restore_categorical_case,
+                target_slot_index_separator=target_slot_index_separator,
+            )
         else:
-            raise ValueError(f"Unknown target slot index seprator {target_slot_index_separator}")
-
+            raise ValueError(f"Unknown target slot index separator {target_slot_index_separator}")
     # Parse intent
     intent = match.group(2).strip()
     if intent:
@@ -334,13 +373,46 @@ def parse_without_context(
         context: str,
         value_separator: Optional[str] = None,
         restore_categorical_case: bool = False,
-        target_slot_index_separator: Optional[str] = ":"
+        target_slot_index_separator: str = ":"
 ):
-    recase = functools.partial(restore_case, restore_categorical_case=restore_categorical_case)
-    raise NotImplementedError
+    for i, pair in enumerate(substrings):
+        pair = pair.strip().split(f"{target_slot_index_separator}", 1)  # slot value pair
+        if len(pair) != 2:
+            # String was not in expected format
+            logger.warning(f"Could not extract slot values in {predicted_str} in {dialogue_id}_{turn_index}.")
+            continue
+        slot = slot_mapping[pair[0].strip()]
+        if slot in cat_values_mapping:
+            parse_categorical_slot(
+                state,
+                dialogue_id,
+                turn_index,
+                service,
+                slot,
+                pair,
+                predicted_str,
+                cat_values_mapping,
+                restore_categorical_case=restore_categorical_case
+            )
+        else:
+            value = pair[1]
+            if value_separator is not None and value_separator in value:
+                value_list = value.split(value_separator)
+                value_list = [v.strip() for v in value_list]
+            else:
+                value_list = [value.strip()]
+            state["slot_values"][slot] = value_list
+            for value in value_list:
+                if value.replace(" ", "").lower() not in context.replace(" ", "").lower():
+                    # Replace spaces to avoid issues with whitespace
+                    if value.strip() not in SPECIAL_VALUES:
+                        logger.warning(
+                            f"Predicted value {value.strip()} for slot {pair[0].strip()} "
+                            f"not in context in {dialogue_id}_{turn_index}."
+                        )
 
 
-def populate_slots(
+def populate_dialogue_state(
         predicted_data: dict,
         template_dialogue: dict,
         dialogue_id: str,
@@ -348,7 +420,8 @@ def populate_slots(
         model_name: str,
         preprocessed_references: dict,
         value_separator: Optional[str] = None,
-        restore_categorical_case: bool = False
+        restore_categorical_case: bool = False,
+        target_slot_index_separator: str = ":",
 ):
     context = ""
     for turn_index in predicted_data:
@@ -399,8 +472,8 @@ def populate_slots(
                                            ref_proc_turn["frames"][service_name]["cat_values_mapping"],
                                            ref_proc_turn["frames"][service_name]["intent_mapping"],
                                            context, value_separator=value_separator,
-                                           restore_categorical_case=restore_categorical_case
-
+                                           restore_categorical_case=restore_categorical_case,
+                                           target_slot_index_separator=target_slot_index_separator,
                                            )
             # Update
             empty_ref_frame_state = empty_ref_frame["state"]
@@ -419,14 +492,31 @@ def parse(
         data_processing_config = experiment_config.data.preprocessing
     except AttributeError:
         data_processing_config = OmegaConf.create()
+        logger.info("Could not find information about data processing config.")
     try:
         value_separator = data_processing_config.value_selection.value_separator
     except AttributeError:
         value_separator = None
+        logger.info(
+            "Could not find attributes 'value_selection.value_separator' in data processing config. "
+            f"Defaulting to {value_separator}."
+        )
     try:
         recase_categorical_values = data_processing_config.lowercase_model_targets
     except AttributeError:
         recase_categorical_values = False
+        logger.info(
+            "Could not find attribute lowercase_model_targets in data processing config. "
+            f"Defaulting to {recase_categorical_values}"
+        )
+    try:
+        target_slot_index_separator = data_processing_config.target_slot_index_separator
+    except AttributeError:
+        target_slot_index_separator = ":"
+        logger.info(
+            "Could not find attribute target_slot_index_separator in data processing config. "
+            f"Defaulting to {target_slot_index_separator}"
+        )
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
@@ -444,7 +534,7 @@ def parse(
                 except KeyError:
                     logging.warning(f"Could not find dialogue {dialogue_id} in predicted states.")
                     raise KeyError
-                populate_slots(
+                populate_dialogue_state(
                     predicted_data,
                     blank_dialogue,
                     dialogue_id,
@@ -452,7 +542,8 @@ def parse(
                     model_name,
                     preprocessed_references[dialogue_id],
                     value_separator=value_separator,
-                    restore_categorical_case=recase_categorical_values
+                    restore_categorical_case=recase_categorical_values,
+                    target_slot_index_separator=target_slot_index_separator,
                 )
             with open(output_dir.joinpath(file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
