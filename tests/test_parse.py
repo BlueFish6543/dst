@@ -9,6 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from dst.parser import parse
 from dst.scoring_utils import get_dataset_as_dict
+from dst.utils import Schema
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ def setup_inputs(schema_variant: str, split: str, data_version: str) -> dict:
         schema = json.load(f)
     return {
         'schema': schema,
+        'schema_obj': Schema(schema_path),
         'preprocessed_references': references,
     }
 
@@ -59,7 +61,7 @@ def patch_experiment_config(
     conf.decode = {}
     conf.data = {}
     conf.data.version = int(model_input_data_version.split("_")[1])
-    conf.data.preprocessing = preprocessing_config
+    conf.data = preprocessing_config
     conf.decode.model_name_or_path = model_name_or_path
     return conf
 
@@ -93,7 +95,9 @@ def get_metrics_inputs(hyp_path: pathlib.Path, ref_path: pathlib.Path):
 
 MODEL_INPUT_DATA_VERSION = ['version_1']
 VARIANTS = ['original', 'v1', 'v2', 'v3', 'v4', 'v5']
+# VARIANTS= ['original']
 SPLITS = ['train', 'dev', 'test']
+# SPLITS = ['dev']
 
 @pytest.mark.parametrize("setup_tmp_directories", [ROOT_TEST_OUTPUTS, ], indirect=True)
 @pytest.mark.parametrize("model_name_or_path", ['google/t5-v1_1-base', ], ids="model_name_or_path={}".format)
@@ -132,6 +136,7 @@ def test_parse(setup_tmp_directories, split: str, variant: str, model_input_data
         SCHEMA_PATH_ROOT.joinpath(variant, split)
     )
     hyps, refs = test_data['dataset_hyp'], test_data['dataset_ref']
+    schema = parser_inputs["schema_obj"]
     for dial_id in refs:
         hyp_dialogue = hyps[dial_id]
         ref_dialogue = refs[dial_id]
@@ -146,16 +151,30 @@ def test_parse(setup_tmp_directories, split: str, variant: str, model_input_data
                 else:
                     assert hyp_frame["state"]["active_intent"] == ref_frame["state"]["active_intent"]
                     assert sorted(hyp_frame["state"]["requested_slots"]) == sorted(ref_frame["state"]["requested_slots"])
-
-                    try:
-                        assert ref_frame["state"]["slot_values"].keys() == hyp_frame["state"]["slot_values"].keys()
-                    except AssertionError:
-                        logger.info(f"Dialogue: {dial_id}, ref turn: {ref_turn}, hyp turn: {hyp_turn}")
+                    assert ref_frame["state"]["slot_values"].keys() == hyp_frame["state"]["slot_values"].keys()
 
                     for ref_slot in ref_frame["state"]["slot_values"]:
                         ref_slot_values = ref_frame["state"]["slot_values"][ref_slot]
                         hyp_slot_values = hyp_frame["state"]["slot_values"][ref_slot]
                         if model_input_data_version == 'version_1':
-                            assert set(hyp_slot_values).issubset(ref_slot_values)
+                            try:
+                                assert set(hyp_slot_values).issubset(ref_slot_values)
+                            except AssertionError:
+                                print()
+                                raise AssertionError
                         else:
-                            assert sorted(hyp_slot_values) == sorted(ref_slot_values)
+                            if ref_slot in schema.get_service_schema(ref_frame["service"]).all_categorical_slots:
+                                try:
+                                    assert sorted(hyp_slot_values) == sorted(ref_slot_values)
+                                except AssertionError:
+                                    print()
+                                    print(ref_dialogue["dialogue_id"], ref_turn)
+                                    print(ref_dialogue["dialogue_id"], hyp_turn)
+                                    raise AssertionError
+                            else:
+                                lowercased_refs = [r.lower() for r in ref_slot_values]
+                                try:
+                                    assert set(sorted(hyp_slot_values)).issubset(sorted(lowercased_refs))
+                                except AssertionError:
+                                    print(ref_dialogue["dialogue_id"], ref_turn)
+                                    raise AssertionError
