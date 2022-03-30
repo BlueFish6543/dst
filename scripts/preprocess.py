@@ -248,6 +248,7 @@ def linearize_targets(
         user_utterance: str,
         value_selection_config: DictConfig,
         lowercase: bool = False,
+        slot_index_separator: Optional[str] = ":",
 ):
     service = frame["service"]
     state = frame["state"]
@@ -278,10 +279,10 @@ def linearize_targets(
         if slot in current_slots:
             # Active
             if slot in cat_values_mapping:
-                targets += f"{i}:{cat_values_mapping[slot][current_slots[slot]]} "
+                targets += f"{i}{slot_index_separator}{cat_values_mapping[slot][current_slots[slot]]} "
             else:
                 # Non-categorical
-                targets += f"{i}:{current_slots[slot]} "
+                targets += f"{i}{slot_index_separator}{current_slots[slot]} "
             this_service_expected_indices.append(i)
     turn_info[service]["target_slot_indices"] = this_service_expected_indices
 
@@ -367,6 +368,12 @@ def generate_description(
 def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) -> dict:
     result = {}
     lowercase_model_inputs=config.lowercase_model_inputs
+    try:
+        target_slot_index_separator = config.target_slot_index_separator
+    except AttributeError:
+        logger.info("Defaulting to : separator for slot indices in targets.")
+        target_slot_index_separator = ':'
+    logger.info(f"Selected separator {target_slot_index_separator} for slot indices in targets")
     for dialogue in raw_dialogues:
         dialogue_id = dialogue["dialogue_id"]
         result[dialogue_id] = []
@@ -392,7 +399,8 @@ def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) ->
                         system_utterance,
                         user_utterance,
                         config.value_selection,
-                        lowercase=config.lowercase_model_targets
+                        lowercase=config.lowercase_model_targets,
+                        slot_index_separator=target_slot_index_separator,
                     )
                 result[dialogue_id].append({
                     "frames": turn_info,
