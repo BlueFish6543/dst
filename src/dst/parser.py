@@ -20,6 +20,8 @@ from dst.parser_metadata import (
 logger = logging.getLogger(__name__)
 
 date_pattern = re.compile(r"\d{1,2}(?:st|nd|rd|th)|(day|tomorrow)")
+dialogue_id: str = ""
+turn_index: str = ""
 
 
 def is_date(s: str) -> bool:
@@ -72,8 +74,6 @@ def restore_case(
 
 
 def parse_predicted_string(
-    dialogue_id: str,
-    turn_index: str,
     service: str,
     predicted_str: str,
     slot_mapping: dict,
@@ -109,8 +109,6 @@ def parse_predicted_string(
             parse_with_context(
                 state,
                 substrings,
-                dialogue_id,
-                turn_index,
                 service,
                 predicted_str,
                 slot_mapping,
@@ -124,8 +122,6 @@ def parse_predicted_string(
             parse_without_context(
                 state,
                 substrings,
-                dialogue_id,
-                turn_index,
                 service,
                 predicted_str,
                 slot_mapping,
@@ -164,8 +160,6 @@ def parse_predicted_string(
 
 def parse_categorical_slot(
     state: dict,
-    dialogue_id: str,
-    turn_index: str,
     service: str,
     slot: str,
     slot_value_pair: list[str, str],
@@ -244,8 +238,6 @@ def is_time_slot(slot_name: str) -> bool:
 def parse_with_context(
     state: dict,
     substrings: list[str],
-    dialogue_id: str,
-    turn_index: str,
     service: str,
     predicted_str: str,
     slot_mapping: dict,
@@ -325,9 +317,13 @@ def parse_with_context(
         #     return [1]
         return repeated_positions
 
-    def find_categorical_slots(substrings: list[str]) -> list[bool]:
-        # TODO: DONT HARDCODE :
-        cat_pattern = r"([0-9]|1[0-6]):([0-9]|1[0-6])[a-l]$"
+    def find_categorical_slots(
+        substrings: list[str], target_slot_index_separator: str = ":"
+    ) -> list[bool]:
+        """Determine whether each element of `substrings` is a categorical_slot_index - value pointer pair."""
+        cat_pattern = (
+            rf"([0-9]|1[0-6]){target_slot_index_separator}([0-9]|1[0-6])[a-l]$"
+        )
         is_cat = []
         for s in substrings:
             matches_pattern = re.match(cat_pattern, s) is not None
@@ -340,13 +336,11 @@ def parse_with_context(
         target_slot_index_separator: Optional[str] = ":",
         value_separator: Optional[str] = None,
     ) -> bool:
+        """Heuristic check to see if the last two substrings appear together in the dialogue context."""
         if len(substrings) < 2:
             return False
         if any(find_categorical_slots(substrings[-2:])):
             return False
-        # if len(substrings) == 2:
-        #     # logger.warning(f"Only two last substrings {substrings}")
-        #     return False
 
         penultimate_value = substrings[-2].split(target_slot_index_separator, 1)[1]
         if value_separator is not None and value_separator in penultimate_value:
@@ -375,6 +369,7 @@ def parse_with_context(
         target_slot_index_separator: Optional[str] = ":",
         value_separator: Optional[str] = None,
     ) -> bool:
+        """ "Heuristic function to check whether the first two substrings appear together in context."""
         if len(substrings) < 2:
             return False
         if any(find_categorical_slots([substrings[0], substrings[1]])):
@@ -411,12 +406,12 @@ def parse_with_context(
         target_slot_index_separator: Optional[str] = ":",
         value_separator: Optional[str] = None,
     ) -> list[str]:
-        nonlocal dialogue_id
+        """Heuristic algorithm for merging substrings extracted from the model prediction."""
         merge_index_candidates = []
         target_slot_indices = [
             int(el.split(target_slot_index_separator)[0]) for el in substrings
         ]
-        # merge values for slot indices that are greater than the number of slots in the service
+        # merge substrings whose slot index is
         invalid_slot_indices = [
             slot_idx
             for slot_idx in target_slot_indices
@@ -574,8 +569,6 @@ def parse_with_context(
             slot_name = slot_mapping[slot_idx]
             parse_categorical_slot(
                 state,
-                dialogue_id,
-                turn_index,
                 service,
                 slot_name,
                 [slot_idx, slot_value],
@@ -618,8 +611,6 @@ def parse_with_context(
             if is_categorical:
                 parse_categorical_slot(
                     state,
-                    dialogue_id,
-                    turn_index,
                     service,
                     slot,
                     pair,
@@ -715,8 +706,6 @@ def parse_with_context(
 def parse_without_context(
     state: dict,
     substrings: list[str],
-    dialogue_id: str,
-    turn_index: str,
     service: str,
     predicted_str: str,
     slot_mapping: dict,
@@ -740,8 +729,6 @@ def parse_without_context(
         if slot in cat_values_mapping:
             parse_categorical_slot(
                 state,
-                dialogue_id,
-                turn_index,
                 service,
                 slot,
                 pair,
@@ -773,7 +760,6 @@ def parse_without_context(
 def populate_dialogue_state(
     predicted_data: dict,
     template_dialogue: dict,
-    dialogue_id: str,
     schema: dict,
     model_name: str,
     preprocessed_references: dict,
@@ -782,6 +768,7 @@ def populate_dialogue_state(
     target_slot_index_separator: str = ":",
 ):
     context = ""
+    global turn_index
     for turn_index in predicted_data:
         # Loop over turns
         if int(turn_index) > 0:
@@ -837,8 +824,6 @@ def populate_dialogue_state(
                 raise ValueError("Unsupported model.")
 
             state = parse_predicted_string(
-                dialogue_id,
-                turn_index,
                 service_name,
                 predicted_str,
                 ref_proc_turn["frames"][service_name]["slot_mapping"],
@@ -910,6 +895,7 @@ def parse(
             with open(file, "r") as f:
                 dialogue_templates = json.load(f)
             for blank_dialogue in dialogue_templates:
+                global dialogue_id
                 dialogue_id = blank_dialogue["dialogue_id"]
                 try:
                     predicted_data = predictions[dialogue_id]
@@ -921,7 +907,6 @@ def parse(
                 populate_dialogue_state(
                     predicted_data,
                     blank_dialogue,
-                    dialogue_id,
                     schema,
                     model_name,
                     preprocessed_references[dialogue_id],
