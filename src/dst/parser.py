@@ -62,6 +62,8 @@ def represents_time(s: str, value_separator: Optional[str] = None) -> bool:
 def restore_case(
     value: str, service: str, restore_categorical_case: bool = True
 ) -> str:
+    """Restore the case of a given categorical slot `value` to the original
+    schema casing to ensure scoring is correct."""
     if not restore_categorical_case or value not in lower_to_schema_case:
         return value
     if value in lower_to_schema_case:
@@ -84,6 +86,14 @@ def parse_predicted_string(
     restore_categorical_case: bool = False,
     target_slot_index_separator: str = ":",
 ) -> dict:
+    """ "Convert predicted string to a SGD state dictionary of the form::
+
+    {
+        'slot_values': dict[str, list[str]], mapping slot names to lists of values,
+        'active_intent': str, the current turn active intent
+        'requested_slots': list[str] of names of information requested by the user.
+    }
+    """
     state = {"slot_values": {}, "active_intent": "NONE", "requested_slots": []}
     # Expect [states] 0:value 1:1a ... [intents] i1 [req_slots] 2 ...
     match = re.search(r"\[states](.*)\[intents](.*)\[req_slots](.*)", predicted_str)
@@ -95,7 +105,7 @@ def parse_predicted_string(
         return state
 
     # Parse slot values
-    if match.group(1).strip():  # if the string is not empty
+    if match.group(1).strip():
         pattern = rf"(?<!^)\s+(?=[0-9]+{target_slot_index_separator})"
         if value_separator == " || ":
             pattern = rf"(?<!^)\s+(?=[0-9]+{target_slot_index_separator})(?<!\|\| )"
@@ -154,7 +164,6 @@ def parse_predicted_string(
             logger.warning(
                 f"Could not extract requested slot {index.strip()} in {predicted_str} in {dialogue_id}_{turn_index}."
             )
-
     return state
 
 
@@ -260,6 +269,8 @@ def parse_with_context(
         candidates by checking the sorting properties of the target slot indices list.
         These will be used to merge back the substrings produced by the splitter output.
         """
+
+        # substrings with repeated slot indices are candidates for merging
         if len(target_slot_indices) != len(set(target_slot_indices)):
             repeated_slot_index = Counter(target_slot_indices).most_common(1)[0][0]
             repeated_positions = [
@@ -267,9 +278,13 @@ def parse_with_context(
                 for pos in range(len(target_slot_indices))
                 if target_slot_indices[pos] == repeated_slot_index
             ]
+            # first slot index is always correct, so a slot with the same index
+            # is a splitting mistake -> return the other index for merging
             if repeated_slot_index == target_slot_indices[0]:
                 return [target_slot_indices.index(repeated_slot_index, 1)]
             return repeated_positions
+        # determine if there are any slot indices that break target slot index array
+        # sorting and return them
         for i in range(1, len(target_slot_indices)):
             arr = [target_slot_indices[0]] + [
                 target_slot_indices[idx]
@@ -285,6 +300,7 @@ def parse_with_context(
                 if next_arr == sorted(next_arr):
                     if len(arr) == len(set(arr)):
                         return [i, i + 1]
+                    # find duplicates as before and return indices of duplicated values
                     repeated_slot_index = Counter(arr).most_common(1)[0][0]
                     repeated_positions = [
                         pos
@@ -301,20 +317,20 @@ def parse_with_context(
                     return [i, i - 1]
                 else:
                     return [i]
-
+        # Fallback if omitting every index in turn does not yield a
+        # sorted target sequence slot index  array
         repeated_slot_index = Counter(target_slot_indices).most_common(1)[0][0]
         repeated_positions = [
             pos
             for pos in range(len(target_slot_indices))
             if target_slot_indices[pos] == repeated_slot_index
         ]
+        # see if there are duplicates otherwise return the longest
+        # sorted subarray
         if len(repeated_positions) == 1:
             for i in range(len(target_slot_indices)):
                 if target_slot_indices[:i] != sorted(target_slot_indices[:i]):
-                    # TODO: TRY I-1 IF THIS DOES NOT WORK
                     return [i - 1, i]
-        # if repeated_positions[0]== 0:
-        #     return [1]
         return repeated_positions
 
     def find_categorical_slots(
@@ -348,8 +364,6 @@ def parse_with_context(
         trailing_values = [substrings[-1]]
         if value_separator is not None and value_separator in substrings[-1]:
             trailing_values = substrings[-1].split(value_separator)
-            # while trailing_values and target_slot_index_separator not in trailing_values:
-            #     trailing_values.pop()
             trailing_values = [
                 v for v in trailing_values if target_slot_index_separator in v
             ]
@@ -374,9 +388,6 @@ def parse_with_context(
             return False
         if any(find_categorical_slots([substrings[0], substrings[1]])):
             return False
-        # if len(substrings) == 2:
-        #     # logger.warning(f"Only two last substrings {substrings}")
-        #     return False
 
         penultimate_value = substrings[0].split(target_slot_index_separator, 1)[1]
         if value_separator is not None and value_separator in penultimate_value:
@@ -384,8 +395,6 @@ def parse_with_context(
         trailing_values = [substrings[1]]
         if value_separator is not None and value_separator in substrings[-1]:
             trailing_values = substrings[1].split(value_separator)
-            # while trailing_values and target_slot_index_separator not in trailing_values:
-            #     trailing_values.pop()
             trailing_values = [
                 v for v in trailing_values if target_slot_index_separator in v
             ]
@@ -412,10 +421,11 @@ def parse_with_context(
             int(el.split(target_slot_index_separator)[0]) for el in substrings
         ]
         # merge substrings whose slot index is
+        this_service_max_slot_idx = len(slot_value_mapping) // 2
         invalid_slot_indices = [
             slot_idx
             for slot_idx in target_slot_indices
-            if slot_idx > (len(slot_value_mapping) // 2)
+            if slot_idx > this_service_max_slot_idx
         ]
         while invalid_slot_indices:
             this_invalid_index = invalid_slot_indices.pop()
@@ -431,7 +441,7 @@ def parse_with_context(
             invalid_slot_indices = [
                 slot_idx
                 for slot_idx in target_slot_indices
-                if slot_idx > (len(slot_value_mapping) // 2)
+                if slot_idx > this_service_max_slot_idx
             ]
         if target_slot_indices[:-1] == sorted(
             target_slot_indices[:-1]
