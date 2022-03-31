@@ -359,13 +359,17 @@ def parse_with_context(
     def find_merge_index(target_slot_indices: list[int]) -> list[int]:
         if len(target_slot_indices) != len(set(target_slot_indices)):
             repeated_slot_index = Counter(target_slot_indices).most_common(1)[0][0]
-            repeated_positions = [pos for pos in range(len(target_slot_indices)) if target_slot_indices[pos] == repeated_slot_index]
+            repeated_positions = [
+                pos for pos in range(len(target_slot_indices)) if target_slot_indices[pos] == repeated_slot_index]
             if repeated_slot_index == target_slot_indices[0]:
                 return [target_slot_indices.index(repeated_slot_index, 1)]
             return repeated_positions
         for i in range(1, len(target_slot_indices)):
-            arr = [target_slot_indices[0]] + [target_slot_indices[idx] for idx in range(len(target_slot_indices)) if
-                                              idx != i and idx != 0]
+            arr = [target_slot_indices[0]] + [
+                target_slot_indices[idx]
+                for idx in range(len(target_slot_indices))
+                if idx != i and idx != 0
+            ]
             if arr == sorted(arr):
                 next_arr = [target_slot_indices[0]] + [target_slot_indices[idx] for idx in
                                                        range(1, len(target_slot_indices)) if idx != i + 1 and idx != 0]
@@ -465,9 +469,13 @@ def parse_with_context(
 
 
 
-    def merge_substrings(substrings: list[str], context: str, slot_value_mapping: dict,
-                         target_slot_index_separator: Optional[str] = ":", value_separator: Optional[str] = None) -> \
-    list[str]:
+    def merge_substrings(
+            substrings: list[str],
+            context: str,
+            slot_value_mapping: dict,
+            target_slot_index_separator: Optional[str] = ":",
+            value_separator: Optional[str] = None,
+    ) -> list[str]:
         nonlocal dialogue_id
         merge_index_candidates = []
         target_slot_indices = [int(el.split(target_slot_index_separator)[0]) for el in substrings]
@@ -496,7 +504,6 @@ def parse_with_context(
                 merge_index_candidates = [pos for pos in range(len(target_slot_indices)) if
                                           target_slot_indices[pos] == repeated_slot_index]
 
-        # TODO: GENERALISE THE TWO BELOW TO CHECK_PAIR_IN_CONTEXT AND CALL ONLY IF THE ARRAY IS SORTED
         if check_last_two_in_context(substrings, context, target_slot_index_separator=target_slot_index_separator,
                                      value_separator=value_separator):
             penultimate_slot = slot_value_mapping[substrings[-2].split(target_slot_index_separator)[0].strip()]
@@ -509,34 +516,18 @@ def parse_with_context(
             target_slot_indices = [int(el.split(target_slot_index_separator)[0]) for el in substrings]
 
         if target_slot_indices == sorted(target_slot_indices):
-            # TODO: IF ANY PAIR IN CONTEXT MERGE IT FIRST AND THEN RETURN
             if len(set(target_slot_indices)) == len(target_slot_indices):
                 return substrings
-            # else:
-            #     repeated_slot_index = Counter(target_slot_indices).most_common(1)[0][0]
-            #     repeated_positions = [pos for pos in range(len(target_slot_indices)) if
-            #                           target_slot_indices[pos] == repeated_slot_index]
-            #     assert len(repeated_positions) == 2
-            #     merge_index = select_using_context(substrings, context, merge_index_candidates,
-            #                                        value_separator=value_separator,
-            #                                        target_slot_index_separator=target_slot_index_separator)
-            #     return substrings
 
         assert len(target_slot_indices) > 1
         while target_slot_indices != sorted(target_slot_indices) or len(target_slot_indices) != len(set(target_slot_indices)):
             if not merge_index_candidates:
                 merge_index_candidates = find_merge_index(target_slot_indices)
-            try:
-                assert merge_index_candidates is not None
-            except AssertionError:
-                print(dialogue_id, turn_index)
-                raise AssertionError
+            assert merge_index_candidates is not None
             if len(merge_index_candidates) == 1:
                 merge_index = merge_index_candidates[0]
-                # merge_index_candidates = []
             else:
                 try:
-                    # assert len(merge_index_candidates) in [1, 2]
                     try:
                         cat_indicator = find_categorical_slots([substrings[idx] for idx in merge_index_candidates])
                     except IndexError:
@@ -549,16 +540,16 @@ def parse_with_context(
                         if not cat_indicator[i]
                     ]
                     if len(merge_index_candidates) >= 2:
-                        merge_index = select_using_context(substrings, context, merge_index_candidates,
-                                                           value_separator=value_separator,
-                                                           target_slot_index_separator=target_slot_index_separator)
+                        merge_index = select_using_context(
+                            substrings,
+                            context,
+                            merge_index_candidates,
+                            value_separator=value_separator,
+                            target_slot_index_separator=target_slot_index_separator,
+                        )
                         if merge_index is None:
                             merge_index_candidates = find_merge_index(target_slot_indices)
                             continue
-                            # print(dialogue_id, turn_index)
-                            # raise AssertionError
-                        # merge_index_candidates.remove(merge_index)
-                        # merge_index = merge_index_candidates[-1]
                     else:
                         # all remaning indices are categorical
                         if not merge_index_candidates:
@@ -573,18 +564,6 @@ def parse_with_context(
                          substrings[merge_index + 1:]
             target_slot_indices = [int(el.split(target_slot_index_separator)[0]) for el in substrings]
             merge_index_candidates = find_merge_index(target_slot_indices)
-            #     for i in range(len(target_slot_indices) - 1):
-            #         # if target_slot_indices[i] > target_slot_indices[i+1]:
-            #         #     if i - 1 > 0 and target_slot_indices[i-1] < target_slot_indices[i]:
-            #         #         merge_index = i + 1
-            #         #     else:
-            #         #         merge_index = i
-            #         #     break
-            #         if target_slot_indices[i+1] < target_slot_indices[i]:
-            #             merge_index = i + 1
-            #             if target_slot_indices[i-1] < target_slot_indices[i+1]:
-            #                 merge_index -= 1
-            #             break
 
         return substrings
 
@@ -620,7 +599,6 @@ def parse_with_context(
             continue
         is_categorical = all(find_categorical_slots([pair]))
         slot_index_val_pair = pair.strip()
-        # TODO: CHECK IF PAIR AT THIS POINT (CALL IT ORIG_PAIR) IS CATEGORICAL AND MAKE AN ASSERTION WITH RESPECT TO FOUND CATEGORICAL VARIABLE
         pair = pair.strip().split(f"{target_slot_index_separator}", 1)  # slot value pair
         if len(pair) != 2:
             # String was not in expected format
