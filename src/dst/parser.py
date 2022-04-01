@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 date_pattern = re.compile(r"\d{1,2}(?:st|nd|rd|th)|(day|tomorrow)")
 dialogue_id: str = ""
 turn_index: str = ""
+MAX_PARSED_SUBSTRINGS = 30
+MAX_SUBSTRING_LEN = 150
 
 
 def is_date(s: str) -> bool:
@@ -175,25 +177,31 @@ def parse_categorical_slot(
     predicted_str: str,
     cat_values_mapping: dict,
     restore_categorical_case: bool = False,
-) -> bool:
+):
     # Categorical
     recase = functools.partial(
         restore_case, restore_categorical_case=restore_categorical_case
     )
     # Invert the mapping to get the categorical value
+    if slot not in cat_values_mapping:
+        logger.warning(
+            f"{dialogue_id}({turn_index}): Could not find slot {slot} in categorical mapping. \n"
+            f"Categorical slots for service {service} are {cat_values_mapping.keys()}."
+        )
+        return
     for categorical_value, categorical_value_idx in cat_values_mapping[slot].items():
         if categorical_value_idx == slot_value_pair[1].strip():
             recased_value = recase(value=categorical_value, service=service)
             assert isinstance(recased_value, str)
             state["slot_values"][slot] = [recased_value]
-            return True
+            break
     else:
         logger.warning(
-            f"Could not extract categorical value for slot {slot_value_pair[0].strip()} in "
-            f"{predicted_str} in {dialogue_id}_{turn_index}. "
+            f"{dialogue_id}({turn_index}): "
+            f"Could not lookup categorical value {slot_value_pair[1].strip()} "
+            f"for slot {slot_value_pair[0].strip()} in {predicted_str}. \n"
             f"Values defined for this slot were {cat_values_mapping[slot]}"
         )
-        return False
 
 
 def select_using_context(
@@ -242,6 +250,22 @@ def select_using_context(
 
 def is_time_slot(slot_name: str) -> bool:
     return slot_name in time_slots
+
+
+def preprocess_substrings(substrings: list[str]) -> list[str]:
+    if len(substrings) > MAX_PARSED_SUBSTRINGS:
+        logger.warning(
+            f"{dialogue_id}({turn_index}) {len(substrings)} were parsed. Parsing only the first {MAX_PARSED_SUBSTRINGS}"
+        )
+        substrings = substrings[:MAX_PARSED_SUBSTRINGS]
+    for i in range(len(substrings)):
+        if len(substrings[i]) > MAX_SUBSTRING_LEN:
+            logger.warning(
+                f"{dialogue_id}({turn_index}) A substring len ({len(substrings[i])}) exceeded max value configured "
+                f"({MAX_SUBSTRING_LEN}). Using only {MAX_SUBSTRING_LEN} to extract values."
+            )
+            substrings[i] = substrings[i][:MAX_SUBSTRING_LEN]
+    return substrings
 
 
 def parse_with_context(
@@ -325,8 +349,8 @@ def parse_with_context(
             for pos in range(len(target_slot_indices))
             if target_slot_indices[pos] == repeated_slot_index
         ]
-        # see if there are duplicates otherwise return the longest
-        # sorted subarray
+        # see if there are duplicates otherwise return the index
+        # that breaks sorting and the previous index
         if len(repeated_positions) == 1:
             for i in range(len(target_slot_indices)):
                 if target_slot_indices[:i] != sorted(target_slot_indices[:i]):
@@ -416,6 +440,8 @@ def parse_with_context(
         value_separator: Optional[str] = None,
     ) -> list[str]:
         """Heuristic algorithm for merging substrings extracted from the model prediction."""
+        if len(substrings) == 1:
+            return substrings
         merge_index_candidates = []
         target_slot_indices = [
             int(el.split(target_slot_index_separator)[0]) for el in substrings
@@ -498,6 +524,7 @@ def parse_with_context(
                 return substrings
 
         assert len(target_slot_indices) > 1
+        max_tries = 10
         while target_slot_indices != sorted(target_slot_indices) or len(
             target_slot_indices
         ) != len(set(target_slot_indices)):
@@ -537,6 +564,9 @@ def parse_with_context(
                             merge_index_candidates = get_merge_index_candidates(
                                 target_slot_indices
                             )
+                            max_tries -= 1
+                            if max_tries == 0:
+                                break
                             continue
                     else:
                         # all remaning indices are categorical
@@ -558,12 +588,19 @@ def parse_with_context(
                 int(el.split(target_slot_index_separator)[0]) for el in substrings
             ]
             merge_index_candidates = get_merge_index_candidates(target_slot_indices)
-
+            max_tries -= 1
+            if max_tries == 0:
+                break
+        if max_tries == 0:
+            logger.warning(
+                f"{dialogue_id}({turn_index}) Substrings merging failed after 10 tries. \n"
+                f"Substrings are {substrings}."
+            )
         return substrings
 
-    skip = 0
     trailing_categoricals = 0
     all_categoricals = False
+    substrings = preprocess_substrings(substrings)
     # TODO: PARSE CATEGORICALS FIRST AND SIMPLIFY MERGE_SUBSTRINGS
     for substring in reversed(substrings):
         if all(find_categorical_slots([substring])):
@@ -576,7 +613,14 @@ def parse_with_context(
             slot_idx, slot_value = pair.strip().split(
                 f"{target_slot_index_separator}", 1
             )
-            slot_name = slot_mapping[slot_idx]
+            try:
+                slot_name = slot_mapping[slot_idx]
+            except KeyError:
+                logger.warning(
+                    f"Invalid slot index {slot_idx} in service {service} where only {len(slot_mapping.items())//2} "
+                    f"indices are defined."
+                )
+                continue
             parse_categorical_slot(
                 state,
                 service,
@@ -589,7 +633,7 @@ def parse_with_context(
         substrings = substrings[:trailing_categoricals]
         if not substrings:
             all_categoricals = True
-        # TODO: ADD THEM TO STATE HERE
+
     substrings = merge_substrings(
         substrings,
         context,
@@ -602,9 +646,6 @@ def parse_with_context(
 
     parsed_nocat_slots = []
     for i, pair in enumerate(substrings):
-        if skip > 0:
-            skip -= 1
-            continue
         is_categorical = all(find_categorical_slots([pair]))
         slot_index_val_pair = pair.strip()
         pair = pair.strip().split(
@@ -855,37 +896,85 @@ def parse(
     preprocessed_references: dict,
     output_dir: pathlib.Path,
     experiment_config: DictConfig,
+    value_separator: Optional[str] = None,
+    recase_categorical_values: Optional[bool] = None,
+    target_slot_index_separator: Optional[str] = None,
 ):
     model_name = experiment_config.decode.model_name_or_path
     try:
         data_processing_config = experiment_config.data.preprocessing
+        train_data_paths = list(data_processing_config.keys())
     except AttributeError:
         data_processing_config = OmegaConf.create()
+        train_data_paths = []
         logger.info("Could not find information about data processing config.")
-    try:
-        value_separator = data_processing_config.value_selection.value_separator
-    except AttributeError:
-        value_separator = None
-        logger.info(
-            "Could not find attributes 'value_selection.value_separator' in data processing config. "
-            f"Defaulting to {value_separator}."
-        )
-    try:
-        recase_categorical_values = data_processing_config.lowercase_model_targets
-    except AttributeError:
-        recase_categorical_values = False
-        logger.info(
-            "Could not find attribute lowercase_model_targets in data processing config. "
-            f"Defaulting to {recase_categorical_values}"
-        )
-    try:
-        target_slot_index_separator = data_processing_config.target_slot_index_separator
-    except AttributeError:
-        target_slot_index_separator = ":"
-        logger.info(
-            "Could not find attribute target_slot_index_separator in data processing config. "
-            f"Defaulting to {target_slot_index_separator}"
-        )
+
+    if value_separator is None:
+        try:
+            value_separators = []
+            for shard in train_data_paths:
+                value_separator = data_processing_config[
+                    shard
+                ].value_selection.value_separator
+                value_separators.append(value_separator)
+            assert len(set(value_separators)) == 1
+            value_separator = value_separators[0]
+        except AttributeError:
+            value_separator = None
+            logger.info(
+                "Could not find attributes 'value_selection.value_separator' in data processing config "
+                "Defaulting to None."
+            )
+        except AssertionError:
+            value_separator = None
+            logger.info(
+                "Either attribute value_selection.value_separator was not set or different"
+                "data shards had different settings. Defaulting to None."
+            )
+    if recase_categorical_values is None:
+        try:
+            recase_settings = []
+            for shard in train_data_paths:
+                recase_categorical_values = data_processing_config[
+                    shard
+                ].lowercase_model_targets
+                recase_settings.append(recase_categorical_values)
+            assert len(set(recase_settings)) == 1
+            recase_categorical_values = recase_settings[0]
+        except AttributeError:
+            recase_categorical_values = False
+            logger.info(
+                "Could not find attribute lowercase_model_targets in data processing config. "
+                f"Defaulting to {recase_categorical_values}"
+            )
+        except AssertionError:
+            recase_categorical_values = False
+            logger.info(
+                "Either attribute lowercase_model_targets was not set or different"
+                "data shards had different settings. Casing will not be altered."
+            )
+    if target_slot_index_separator is None:
+        try:
+            slot_index_separator_settings = []
+            for shard in train_data_paths:
+                target_slot_index_separator = data_processing_config[
+                    shard
+                ].target_slot_index_separator
+                slot_index_separator_settings.append(target_slot_index_separator)
+            target_slot_index_separator = slot_index_separator_settings[0]
+            assert len(set(slot_index_separator_settings)) == 1
+        except AttributeError:
+            target_slot_index_separator = ":"
+            logger.info(
+                "Could not find attribute target_slot_index_separator in data processing config. "
+                f"Defaulting to {target_slot_index_separator}"
+            )
+        except AssertionError:
+            target_slot_index_separator = ":"
+            logger.info(
+                "Either attribute target_slot_index_separator was not set or different"
+                "data shards had different settings. Defaulting to `:`."
+            )
 
     if value_separator is not None and target_slot_index_separator == ":":
         logger.warning(
