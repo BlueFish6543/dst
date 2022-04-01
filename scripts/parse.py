@@ -13,7 +13,7 @@ from omegaconf import OmegaConf
 
 from dst.parser import parse
 
-logger  = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @click.command()
@@ -35,8 +35,8 @@ logger  = logging.getLogger(__name__)
     required=False,
     type=click.Path(path_type=Path),
     help="Absolute path to the directory where SGD-formatted dialogues containing predictions"
-         "as opposed to annotations are output. If not passed, the dialogues are saved in the "
-         "same directory as the parser input, (i.e., -b argument).",
+    "as opposed to annotations are output. If not passed, the dialogues are saved in the "
+    "same directory as the parser input, (i.e., -b argument).",
     default=None,
 )
 @click.option(
@@ -57,22 +57,22 @@ logger  = logging.getLogger(__name__)
 )
 @click.option(
     "-t",
-    "--test-data",
+    "--test_data",
     "test_path",
     required=True,
     type=click.Path(exists=True, path_type=Path),
     help="Path to pre-processed test data for which model predictions are to be parsed."
-         "Used to retrieve mappings from indices to slot/intent names which are required to"
-         "recover slot names from predicted indices",
+    "Used to retrieve mappings from indices to slot/intent names which are required to"
+    "recover slot names from predicted indices",
 )
 def main(
-        belief_path: pathlib.Path,
-        schema_path: pathlib.Path,
-        output_dir: Union[pathlib.Path, None],
-        dialogue_templates: pathlib.Path,
-        test_path: pathlib.Path,
-        log_level: int):
-
+    belief_path: pathlib.Path,
+    schema_path: pathlib.Path,
+    output_dir: Union[pathlib.Path, None],
+    dialogue_templates: pathlib.Path,
+    test_path: pathlib.Path,
+    log_level: int,
+):
 
     if output_dir is None:
         output_dir = belief_path
@@ -88,8 +88,8 @@ def main(
         logging.StreamHandler(sys.stderr),
         logging.FileHandler(
             f'{output_dir.joinpath("parse")}.log',
-            mode='w',
-        )
+            mode="w",
+        ),
     ]
     logging.basicConfig(
         handlers=handlers,
@@ -102,13 +102,20 @@ def main(
         schema = json.load(f)
     with open(test_path, "r") as f:
         preprocessed_refs = json.load(f)
-    assert belief_path.joinpath("belief_states.json").exists(), "Could not find belief state files"
+    assert belief_path.joinpath(
+        "belief_states.json"
+    ).exists(), "Could not find belief state files"
     # Copy templates over first
     copy_tree(str(dialogue_templates), str(output_dir))
     logger.info(f"Parsing {belief_path} directory.")
     with open(belief_path.joinpath("belief_states.json"), "r") as f:
         predictions = json.load(f)
-    parse(schema, predictions, preprocessed_refs["data"], output_dir, experiment_config)
+    try:
+        preprocessed_refs = preprocessed_refs["data"]
+    except KeyError:
+        pass
+    parse(schema, predictions, preprocessed_refs, output_dir, experiment_config)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
