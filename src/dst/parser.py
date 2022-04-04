@@ -268,6 +268,20 @@ def preprocess_substrings(substrings: list[str]) -> list[str]:
     return substrings
 
 
+def find_categorical_slots(
+    substrings: list[str], target_slot_index_separator: str = ":"
+) -> list[bool]:
+    """Determine whether each element of `substrings` is a categorical_slot_index - value pointer pair."""
+    cat_pattern = rf"([0-9]|1[0-6]){target_slot_index_separator}([0-9]|1[0-6])[a-l]$"
+    is_cat = []
+    max_len = 5 + len(target_slot_index_separator)
+    remainder = 0 if len(target_slot_index_separator) % 2 == 1 else 1
+    for s in substrings:
+        matches_pattern = re.match(cat_pattern, s) is not None
+        is_cat.append(len(s) <= max_len and len(s) % 2 == remainder and matches_pattern)
+    return is_cat
+
+
 def parse_with_context(
     state: dict,
     substrings: list[str],
@@ -357,19 +371,6 @@ def parse_with_context(
                     return [i - 1, i]
         return repeated_positions
 
-    def find_categorical_slots(
-        substrings: list[str], target_slot_index_separator: str = ":"
-    ) -> list[bool]:
-        """Determine whether each element of `substrings` is a categorical_slot_index - value pointer pair."""
-        cat_pattern = (
-            rf"([0-9]|1[0-6]){target_slot_index_separator}([0-9]|1[0-6])[a-l]$"
-        )
-        is_cat = []
-        for s in substrings:
-            matches_pattern = re.match(cat_pattern, s) is not None
-            is_cat.append(len(s) <= 6 and len(s) % 2 == 0 and matches_pattern)
-        return is_cat
-
     def check_last_two_in_context(
         substrings: list[str],
         context: str,
@@ -379,7 +380,11 @@ def parse_with_context(
         """Heuristic check to see if the last two substrings appear together in the dialogue context."""
         if len(substrings) < 2:
             return False
-        if any(find_categorical_slots(substrings[-2:])):
+        if any(
+            find_categorical_slots(
+                substrings[-2:], target_slot_index_separator=target_slot_index_separator
+            )
+        ):
             return False
 
         penultimate_value = substrings[-2].split(target_slot_index_separator, 1)[1]
@@ -410,7 +415,12 @@ def parse_with_context(
         """ "Heuristic function to check whether the first two substrings appear together in context."""
         if len(substrings) < 2:
             return False
-        if any(find_categorical_slots([substrings[0], substrings[1]])):
+        if any(
+            find_categorical_slots(
+                [substrings[0], substrings[1]],
+                target_slot_index_separator=target_slot_index_separator,
+            )
+        ):
             return False
 
         penultimate_value = substrings[0].split(target_slot_index_separator, 1)[1]
@@ -447,7 +457,7 @@ def parse_with_context(
             int(el.split(target_slot_index_separator)[0]) for el in substrings
         ]
         # merge substrings whose slot index is
-        this_service_max_slot_idx = len(slot_value_mapping) // 2
+        this_service_max_slot_idx = len(slot_value_mapping) // 2 - 1
         invalid_slot_indices = [
             slot_idx
             for slot_idx in target_slot_indices
@@ -473,7 +483,12 @@ def parse_with_context(
             target_slot_indices[:-1]
         ) and target_slot_indices != sorted(target_slot_indices):
             if len(target_slot_indices[:-1]) == len(set(target_slot_indices[:-1])):
-                if any(find_categorical_slots([substrings[-1]])):
+                if any(
+                    find_categorical_slots(
+                        [substrings[-1]],
+                        target_slot_index_separator=target_slot_index_separator,
+                    )
+                ):
                     substrings = (
                         substrings[:-3]
                         + [f"{substrings[-3]} {substrings[-2]}"]
@@ -537,14 +552,16 @@ def parse_with_context(
                 try:
                     try:
                         cat_indicator = find_categorical_slots(
-                            [substrings[idx] for idx in merge_index_candidates]
+                            [substrings[idx] for idx in merge_index_candidates],
+                            target_slot_index_separator=target_slot_index_separator,
                         )
                     except IndexError:
                         merge_index_candidates = get_merge_index_candidates(
                             target_slot_indices
                         )
                         cat_indicator = find_categorical_slots(
-                            [substrings[idx] for idx in merge_index_candidates]
+                            [substrings[idx] for idx in merge_index_candidates],
+                            target_slot_index_separator=target_slot_index_separator,
                         )
 
                     merge_index_candidates = [
@@ -574,6 +591,9 @@ def parse_with_context(
                             merge_index_candidates = get_merge_index_candidates(
                                 target_slot_indices
                             )
+                            max_tries -= 1
+                            if max_tries == 0:
+                                break
                             continue
                         merge_index = merge_index_candidates[0]
                 except AssertionError:
@@ -603,7 +623,11 @@ def parse_with_context(
     substrings = preprocess_substrings(substrings)
     # TODO: PARSE CATEGORICALS FIRST AND SIMPLIFY MERGE_SUBSTRINGS
     for substring in reversed(substrings):
-        if all(find_categorical_slots([substring])):
+        if all(
+            find_categorical_slots(
+                [substring], target_slot_index_separator=target_slot_index_separator
+            )
+        ):
             trailing_categoricals -= 1
         else:
             break
@@ -646,7 +670,11 @@ def parse_with_context(
 
     parsed_nocat_slots = []
     for i, pair in enumerate(substrings):
-        is_categorical = all(find_categorical_slots([pair]))
+        is_categorical = all(
+            find_categorical_slots(
+                [pair], target_slot_index_separator=target_slot_index_separator
+            )
+        )
         slot_index_val_pair = pair.strip()
         pair = pair.strip().split(
             f"{target_slot_index_separator}", 1
@@ -776,36 +804,41 @@ def parse_without_context(
                 f"Could not extract slot values in {predicted_str} in {dialogue_id}_{turn_index}."
             )
             continue
-        slot = slot_mapping[pair[0].strip()]
-        if slot in cat_values_mapping:
-            parse_categorical_slot(
-                state,
-                service,
-                slot,
-                pair,
-                predicted_str,
-                cat_values_mapping,
-                restore_categorical_case=restore_categorical_case,
-            )
-        else:
-            value = pair[1]
-            if value_separator is not None and value_separator in value:
-                value_list = value.split(value_separator)
-                value_list = [v.strip() for v in value_list]
+        try:
+            slot = slot_mapping[pair[0].strip()]
+            if slot in cat_values_mapping:
+                parse_categorical_slot(
+                    state,
+                    service,
+                    slot,
+                    pair,
+                    predicted_str,
+                    cat_values_mapping,
+                    restore_categorical_case=restore_categorical_case,
+                )
             else:
-                value_list = [value.strip()]
-            state["slot_values"][slot] = value_list
-            for value in value_list:
-                if (
-                    value.replace(" ", "").lower()
-                    not in context.replace(" ", "").lower()
-                ):
-                    # Replace spaces to avoid issues with whitespace
-                    if value.strip() not in CATEGORICAL_SPECIAL_VALUES:
-                        logger.warning(
-                            f"Predicted value {value.strip()} for slot {pair[0].strip()} "
-                            f"not in context in {dialogue_id}_{turn_index}."
-                        )
+                value = pair[1]
+                if value_separator is not None and value_separator in value:
+                    value_list = value.split(value_separator)
+                    value_list = [v.strip() for v in value_list]
+                else:
+                    value_list = [value.strip()]
+                state["slot_values"][slot] = value_list
+                for value in value_list:
+                    if (
+                        value.replace(" ", "").lower()
+                        not in context.replace(" ", "").lower()
+                    ):
+                        # Replace spaces to avoid issues with whitespace
+                        if value.strip() not in CATEGORICAL_SPECIAL_VALUES:
+                            logger.warning(
+                                f"Predicted value {value.strip()} for slot {pair[0].strip()} "
+                                f"not in context in {dialogue_id}_{turn_index}."
+                            )
+        except KeyError:
+            logger.warning(
+                f"Could not extract slot {pair[0].strip()} in {predicted_str} in {dialogue_id}_{turn_index}."
+            )
 
 
 def populate_dialogue_state(
@@ -862,7 +895,7 @@ def populate_dialogue_state(
                 logger.warning(
                     f"No <EOS> token in {dialogue_id}_{turn_index}. Skipping."
                 )
-                raise ValueError
+                continue
 
             # Extract string between <BOS> and <EOS>
             if "gpt2" in model_name.lower():
@@ -984,7 +1017,7 @@ def parse(
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
-    only_files = ["dialogues_023.json"]  # noqa
+    only_files = ["dialogues_025.json"]  # noqa
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
@@ -996,6 +1029,7 @@ def parse(
             for blank_dialogue in dialogue_templates:
                 global dialogue_id
                 dialogue_id = blank_dialogue["dialogue_id"]
+                logger.info(f"Parsing dialogue {dialogue_id}")
                 try:
                     predicted_data = predictions[dialogue_id]
                 except KeyError:
