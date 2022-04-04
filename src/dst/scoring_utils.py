@@ -3,7 +3,6 @@ import json
 
 from absl import logging
 
-
 PER_FRAME_OUTPUT_FILENAME = "metrics_and_dialogues.json"
 
 
@@ -15,10 +14,10 @@ def get_dataset_as_dict(file_path_patterns):
     else:
         list_fp = sorted(glob.glob(file_path_patterns))
     for fp in list_fp:
-        if PER_FRAME_OUTPUT_FILENAME in fp or 'belief' in fp:
+        if PER_FRAME_OUTPUT_FILENAME in fp or "belief" in fp:
             continue
         logging.info("Loading file: %s", fp)
-        with open(fp, 'r') as f:
+        with open(fp, "r") as f:
             data = json.load(f)
             if isinstance(data, list):
                 for dial in data:
@@ -26,3 +25,18 @@ def get_dataset_as_dict(file_path_patterns):
             elif isinstance(data, dict):
                 dataset_dict.update(data)
     return dataset_dict
+
+
+def get_service_set(schema_path):
+    """Get the set of all services present in a schema."""
+    service_set = set()
+    with open(schema_path, "r") as f:
+        schema = json.load(f)
+        for service in schema:
+            service_set.add(service["service_name"])
+    return service_set
+
+
+def get_in_domain_services(schema_path_1, schema_path_2):
+    """Get the set of common services between two schemas."""
+    return get_service_set(schema_path_1) & get_service_set(schema_path_2)

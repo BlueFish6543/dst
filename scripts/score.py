@@ -23,7 +23,7 @@ import os
 from absl import app, flags, logging
 
 from dst.evaluation import ALL_SERVICES, get_metrics
-from dst.scoring_utils import get_dataset_as_dict
+from dst.scoring_utils import get_dataset_as_dict, get_in_domain_services
 
 FLAGS = flags.FLAGS
 
@@ -70,21 +70,6 @@ flags.DEFINE_boolean(
 PER_FRAME_OUTPUT_FILENAME = "metrics_and_dialogues.json"
 
 
-def get_service_set(schema_path):
-    """Get the set of all services present in a schema."""
-    service_set = set()
-    with open(schema_path, "r") as f:
-        schema = json.load(f)
-        for service in schema:
-            service_set.add(service["service_name"])
-    return service_set
-
-
-def get_in_domain_services(schema_path_1, schema_path_2):
-    """Get the set of common services between two schemas."""
-    return get_service_set(schema_path_1) & get_service_set(schema_path_2)
-
-
 def main(_):
     logging.set_verbosity(logging.INFO)
 
@@ -120,7 +105,7 @@ def main(_):
         json.dump(
             all_metric_aggregate, f, indent=2, separators=(",", ": "), sort_keys=True
         )
-    # Write the per-frame metrics values with the corrresponding dialogue frames.
+    # Write the per-frame metrics values with the corresponding dialogue frames.
     with open(os.path.join(FLAGS.prediction_dir, PER_FRAME_OUTPUT_FILENAME), "w") as f:
         json.dump(dataset_hyp, f, indent=2, separators=(",", ": "))
 
