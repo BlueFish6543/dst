@@ -5,10 +5,12 @@ from distutils.dir_util import copy_tree
 from operator import itemgetter
 
 import pytest
+from numpy.testing import assert_almost_equal
 from omegaconf import DictConfig, OmegaConf
 
+from dst.evaluation import get_metrics
 from dst.parser import parse
-from dst.scoring_utils import get_dataset_as_dict
+from dst.scoring_utils import get_dataset_as_dict, get_in_domain_services
 from dst.utils import Schema
 
 logger = logging.getLogger(__name__)
@@ -23,11 +25,13 @@ SCHEMA_PATH_ROOT = pathlib.Path(
     "/scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/raw"
 )
 ROOT_TEST_OUTPUTS = pathlib.Path("/scratches/neuron/dev/d3st/tests/outputs")
+
+
 if not ROOT_TEST_OUTPUTS.exists():
     ROOT_TEST_OUTPUTS.mkdir(exist_ok=False, parents=True)
 
 
-def setup_inputs(schema_variant: str, split: str, data_version: str) -> dict:
+def setup_parser_inputs(schema_variant: str, split: str, data_version: str) -> dict:
     schema_path = SCHEMA_PATH_ROOT.joinpath(schema_variant, split, "schema.json")
     references_path = PROCESSED_REFERENCES_ROOT_PATH.joinpath(
         schema_variant, split, data_version, "data.json"
@@ -40,6 +44,27 @@ def setup_inputs(schema_variant: str, split: str, data_version: str) -> dict:
         "schema": schema,
         "schema_obj": Schema(schema_path),
         "preprocessed_references": references,
+    }
+
+
+def setup_evaluator_inputs(schema_variant: str, split: str) -> dict:
+    eval_schema_path = SCHEMA_PATH_ROOT.joinpath(schema_variant, split, "schema.json")
+    train_schema_path = SCHEMA_PATH_ROOT.joinpath(
+        schema_variant, "train", "schema.json"
+    )
+    with open(eval_schema_path, "r") as f:
+        eval_services = {}
+        list_services = json.load(f)
+        for service in list_services:
+            eval_services[service["service_name"]] = service
+
+    in_domain_services = get_in_domain_services(
+        eval_schema_path,
+        train_schema_path,
+    )
+    return {
+        "eval_services": eval_services,
+        "in_domain_services": in_domain_services,
     }
 
 
@@ -125,7 +150,7 @@ def test_parse(
     model_name_or_path: str,
 ):
 
-    parser_inputs = setup_inputs(variant, split, model_input_data_version)
+    parser_inputs = setup_parser_inputs(variant, split, model_input_data_version)
     experiment_config = patch_experiment_config(
         variant, split, model_input_data_version, model_name_or_path
     )
@@ -229,3 +254,20 @@ def test_parse(
                                     # except AssertionError:
                                     #     print("Failed to recover nocat slots in", dial_id, turn_idx)
                                     #     raise AssertionError
+
+    evaluator_inputs = setup_evaluator_inputs(variant, split)
+    all_metric_aggregate, _ = get_metrics(
+        test_data["dataset_ref"],
+        test_data["dataset_hyp"],
+        evaluator_inputs["eval_services"],
+        evaluator_inputs["in_domain_services"],
+    )
+    assert_almost_equal(
+        all_metric_aggregate["#ALL_SERVICES"]["active_intent_accuracy"], 1.0
+    )
+    assert_almost_equal(
+        all_metric_aggregate["#ALL_SERVICES"]["requested_slots_f1"], 1.0
+    )
+    assert_almost_equal(
+        all_metric_aggregate["#ALL_SERVICES"]["joint_goal_accuracy"], 1.0
+    )
