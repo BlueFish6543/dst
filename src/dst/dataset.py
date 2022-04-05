@@ -79,7 +79,6 @@ class DSTDataset(torch.utils.data.Dataset):
         self.tokenizer = tokenizer
         self.data_paths = data_paths
         self.pad_id = tokenizer.pad_token_id  # pad to max example length
-        self.eos_id = tokenizer.eos_token_id
         self.ignore_token_id = -100
         self.max_seq_len = args.max_seq_len
         self.decoder_max_seq_len = args.decoder_max_seq_len
@@ -384,10 +383,11 @@ class BatchedTestDataset(DSTDataset):
     ):
         self.to_decode: set[str] = set(args.decode_only)
         self.encoder_over_length = 0
-        super().__init__(args, tokenizer, data_paths, data_size, train_schema)
         tokenizer.padding_side = "left"
         tokenizer.pad_token = tokenizer.eos_token
         self.batch_size = args.batch_size
+        # TODO: VERY BAD DESIGN, NEEDS REFACTORING
+        super().__init__(args, tokenizer, data_paths, data_size, train_schema)
 
     def _create_examples(self):
         assert (
@@ -447,7 +447,7 @@ class BatchedTestDataset(DSTDataset):
                         remaining_examples = self.batch_size
                         this_batch = deepcopy(this_batch_template)
         if remaining_examples in range(1, self.batch_size):
-            assert this_batch["test_input"]
+            assert this_batch["text_input"]
             last_batch = self.create_ids(this_batch)
             self.examples.append(last_batch)
         self._sanity_check(n_frames)
@@ -461,7 +461,7 @@ class BatchedTestDataset(DSTDataset):
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=self.decoder_max_seq_len,
+            max_length=self.max_seq_len,
         )
         batch["input_ids"] = model_inputs["input_ids"]
         batch["attention_mask"] = model_inputs["attention_mask"]
