@@ -381,7 +381,6 @@ def main(
         optimizer = Adafactor(
             model.parameters(),
             lr=args.train.learning_rate,
-            beta1=args.train.beta1,
             relative_step=args.train.relative_step,
         )
     else:
