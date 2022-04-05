@@ -397,7 +397,6 @@ class BatchedTestDataset(DSTDataset):
         with open(self.data_paths[0], "r") as f:
             data = json.load(f)
         schema_variant_identifier = infer_schema_variant_from_path(self.data_paths[0])
-        # TODO: MAKE SURE YOU DON'T HAVE ISSUES WHEN NB EXAMPLE IS NOT DIVISIBLE BY BATCH SIZE
         remaining_examples = self.batch_size
         this_batch_template = {
             "text_input": [],
