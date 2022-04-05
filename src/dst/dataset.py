@@ -464,6 +464,7 @@ class BatchedTestDataset(DSTDataset):
             max_length=self.decoder_max_seq_len,
         )
         batch["input_ids"] = model_inputs["input_ids"]
+        batch["attention_mask"] = model_inputs["attention_mask"]
         return batch
 
     def collate_fn(self, batch):
