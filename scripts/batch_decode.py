@@ -190,15 +190,25 @@ def decode_checkpoint(
     help="Decode all checkpoints in a folder. -c/--checkpoint must be the dir where all checkpoint folders are stored.",
 )
 @click.option(
-    "--override", is_flag=True, default=False, help="Override previous results."
-)
-@click.option(
     "-f",
     "--decode-freq",
     "freq",
     type=int,
     default=1,
     help="Subsample the checkpoints to speed up task-oriented evaluation as training progresses.",
+)
+@click.option(
+    "-reverse",
+    "--reverse_decode",
+    "reverse",
+    is_flag=True,
+    default=True,
+    help="When multiple checkpoints are decoded, it ensures that later models decode first. This option "
+    "does not have any effect if the decode_steps is option is specified in the configuration file. "
+    "Use that option if you require that checkpoints are decoded in a specific order.",
+)
+@click.option(
+    "--override", is_flag=True, default=False, help="Override previous results."
 )
 @click.option(
     "-s",
@@ -218,8 +228,9 @@ def main(
     hyp_dir: pathlib.Path,
     log_level: int,
     all: bool,
-    override: bool,
     freq: int,
+    reverse: bool,
+    override: bool,
     orig_train_schema_path: pathlib.Path,
     split: str,
 ):
@@ -228,6 +239,7 @@ def main(
     args = args.decode
     args.orig_train_schema_path = str(orig_train_schema_path)
     args.override = override
+    args.reverse = reverse
     experiment = args.experiment_name
     schema_variant_identifier = infer_schema_variant_from_path(str(test_path))
     data_version = infer_data_version_from_path(str(test_path))
@@ -311,6 +323,8 @@ def main(
                 all_checkpoints = filtered_checkpoints
             else:
                 all_checkpoints = all_checkpoints[::freq]
+            if not args.decode_steps and reverse:
+                all_checkpoints = reversed(all_checkpoints)
     else:
         try:
             if checkpoint.exists():
