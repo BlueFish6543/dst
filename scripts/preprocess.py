@@ -1,19 +1,18 @@
 from __future__ import annotations
+
 import json
 import logging
 import pathlib
 import random
-import sys
-
-import click
-
 import re
 import string
-from typing import Optional, List
+import sys
+from typing import List, Optional
 
-from omegaconf import OmegaConf, DictConfig
+import click
+from omegaconf import DictConfig, OmegaConf
 
-from dst.utils import infer_schema_variant_from_path, save_data, get_datetime, set_seed
+from dst.utils import get_datetime, infer_schema_variant_from_path, save_data, set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -47,25 +46,30 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Flights_12": ["airlines", "seating_class"] + ["airline_name", "cabin_class"],
     "Flights_13": ["airlines", "seating_class"] + ["carrier", "travel_class"],
     "Flights_14": ["airlines", "seating_class"] + ["name_of_airline", "class"],
-    "Flights_15": ["airlines", "seating_class"] + [ "commercial_airline", "class_seating"],
+    "Flights_15": ["airlines", "seating_class"]
+    + ["commercial_airline", "class_seating"],
     "Flights_2": ["airlines", "seating_class"],
     "Flights_21": ["airlines", "seating_class"] + ["airline", "seat_class"],
-    "Flights_22": ["airlines", "seating_class"] + ["airline_name","class_of_seats"],
-    "Flights_23": ["airlines", "seating_class"] + [ "airline_to_book", "class_type"],
-    "Flights_24": ["airlines", "seating_class"] + ["airline_companies", "flight_ticket_class"],
-    "Flights_25": ["airlines", "seating_class"] + ["name_of_airline", "class_preference"],
+    "Flights_22": ["airlines", "seating_class"] + ["airline_name", "class_of_seats"],
+    "Flights_23": ["airlines", "seating_class"] + ["airline_to_book", "class_type"],
+    "Flights_24": ["airlines", "seating_class"]
+    + ["airline_companies", "flight_ticket_class"],
+    "Flights_25": ["airlines", "seating_class"]
+    + ["name_of_airline", "class_preference"],
     "Flights_3": ["airlines", "flight_class"],
-    "Flights_31": ["airlines", "flight_class"] + ['airline', 'fare_class'],
-    "Flights_32": ["airlines", "flight_class"] + ['airline_name', 'flight_fare_class'],
-    "Flights_33": ["airlines", "flight_class"] + ['provider', "seat_class"],
+    "Flights_31": ["airlines", "flight_class"] + ["airline", "fare_class"],
+    "Flights_32": ["airlines", "flight_class"] + ["airline_name", "flight_fare_class"],
+    "Flights_33": ["airlines", "flight_class"] + ["provider", "seat_class"],
     "Flights_34": ["airlines", "flight_class"] + ["class", "flight_name"],
-    "Flights_35": ["airlines", "flight_class"] + ["operating_airline", "class_of_flights"],
+    "Flights_35": ["airlines", "flight_class"]
+    + ["operating_airline", "class_of_flights"],
     "Flights_4": ["airlines", "seating_class"],
     "Flights_41": ["airlines", "seating_class"] + ["airline", "seat_class"],
-    "Flights_42": ["airlines", "seating_class"] + ['airline_name', 'seating_choices'],
+    "Flights_42": ["airlines", "seating_class"] + ["airline_name", "seating_choices"],
     "Flights_43": ["airlines", "seating_class"] + ["company", "seat_choice"],
     "Flights_44": ["airlines", "seating_class"] + ["company_name", "cabin_seat_class"],
-    "Flights_45": ["airlines", "seating_class"] + ["air_transport_services_company_name", "seat_option"],
+    "Flights_45": ["airlines", "seating_class"]
+    + ["air_transport_services_company_name", "seat_option"],
     "Media_2": ["subtitle_language"],
     "Media_21": ["subtitle_language"] + ["subtitles_language"],
     "Media_22": ["subtitle_language"] + ["caption_language"],
@@ -73,8 +77,8 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Media_24": ["subtitle_language"] + ["closed_caption_language"],
     "Media_25": ["subtitle_language"] + ["language_of_subtitles"],
     "Media_3": ["subtitle_language"],
-    "Media_31": ["subtitle_language"] + ['movie_subtitle_language'],
-    "Media_32": ["subtitle_language"] + ['subtitles'],
+    "Media_31": ["subtitle_language"] + ["movie_subtitle_language"],
+    "Media_32": ["subtitle_language"] + ["subtitles"],
     "Media_33": ["subtitle_language"] + ["language"],
     "Media_34": ["subtitle_language"] + ["closed_caption_language"],
     "Media_35": ["subtitle_language"] + ["language_of_subtitles"],
@@ -95,11 +99,14 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Music_22": ["playback_device"] + ["audio_device"],
     "Music_23": ["playback_device"] + ["device"],
     "Music_24": ["playback_device"] + ["device_name"],
-    "Music_25": ["playback_device"] + ["device_to_play_song",],
+    "Music_25": ["playback_device"]
+    + [
+        "device_to_play_song",
+    ],
     "Music_3": ["device"],
     "Music_31": ["device"] + ["playback_device"],
     "Music_32": ["device"] + ["media_player"],
-    "Music_33": ["device"] + ['media_player_name'],
+    "Music_33": ["device"] + ["media_player_name"],
     "Music_34": ["device"] + ["playback_location"],
     "Music_35": ["device"] + ["name_of_media_player"],
     "RentalCars_1": ["type"],
@@ -116,9 +123,9 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "RentalCars_25": ["car_type"] + ["rental_car_class"],
     "RentalCars_3": ["car_type"],
     "RentalCars_31": ["car_type"] + ["car_style"],
-    "RentalCars_32": ["car_type"] + ['auto_type'],
+    "RentalCars_32": ["car_type"] + ["auto_type"],
     "RentalCars_33": ["car_type"] + ["vehicle_type"],
-    "RentalCars_34": ["car_type"] + ["type_of_car"] ,
+    "RentalCars_34": ["car_type"] + ["type_of_car"],
     "RentalCars_35": ["car_type"] + ["hatchback_sedan_or_suv"],
     "Restaurants_1": ["price_range"],
     "Restaurants_11": ["price_range"] + ["menu_price_range"],
@@ -133,8 +140,8 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Restaurants_24": ["price_range"] + ["restaurant_prices"],
     "Restaurants_25": ["price_range"] + ["restaurant_range_of_price"],
     "Trains_1": ["class"],
-    "Trains_11": ["class"] + ['fare_class'],
-    "Trains_12": ["class"] + ['train_fare_class'],
+    "Trains_11": ["class"] + ["fare_class"],
+    "Trains_12": ["class"] + ["train_fare_class"],
     "Trains_13": ["class"] + ["class_of_reservation"],
     "Trains_14": ["class"] + ["reservation_fare_class"],
     "Trains_15": ["class"] + ["fare_class_for_reservation"],
@@ -145,7 +152,7 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Travel_14": ["category"] + ["category_of_attraction"],
     "Travel_15": ["category"] + ["type_of_attraction"],
 }
-ALPHA_NUMERIC_SLOT_EXCEPTIONS = {'movie_rating_out_of_10'}
+ALPHA_NUMERIC_SLOT_EXCEPTIONS = {"movie_rating_out_of_10"}
 
 
 def has_alphanumeric_words(
@@ -160,9 +167,7 @@ def has_alphanumeric_words(
 
 
 def value_in_utterance(
-        values: List[str],
-        system_utterance: str,
-        user_utterance: str
+    values: List[str], system_utterance: str, user_utterance: str
 ) -> Optional[str]:
     # Returns the first value in a list of values that is found in system or user utterance
     for value in values:
@@ -172,10 +177,10 @@ def value_in_utterance(
 
 
 def heuristic_slot_value_selection(
-        frame: dict,
-        previous_slots: dict[str, dict[str, str]],
-        system_utterance: str,
-        user_utterance: str,
+    frame: dict,
+    previous_slots: dict[str, dict[str, str]],
+    system_utterance: str,
+    user_utterance: str,
 ) -> dict[str, str]:
     """Returns the current values of all slots in the dialogue state, handling
     situations when there are multiple values by:
@@ -199,8 +204,11 @@ def heuristic_slot_value_selection(
         assert isinstance(values, list)
         if service in previous_slots and slot in previous_slots[service]:
             assert not isinstance(previous_slots[service][slot], list)
-        if service in previous_slots and slot in previous_slots[service] and \
-                previous_slots[service][slot] in values:
+        if (
+            service in previous_slots
+            and slot in previous_slots[service]
+            and previous_slots[service][slot] in values
+        ):
             current_slots[slot] = previous_slots[service][slot]
         else:
             value = value_in_utterance(values, system_utterance, user_utterance)
@@ -208,7 +216,9 @@ def heuristic_slot_value_selection(
     return current_slots
 
 
-def concatenated_slot_value_selection(frame: dict, value_selection_config: DictConfig) -> dict[str, str]:
+def concatenated_slot_value_selection(
+    frame: dict, value_selection_config: DictConfig
+) -> dict[str, str]:
     """Handles multiple values in dialogue state of a given service by concatenating them.
 
     Parameters
@@ -231,7 +241,9 @@ def concatenated_slot_value_selection(frame: dict, value_selection_config: DictC
     }
 
 
-def concatenate_values(values: list[str], shuffle: bool = True, separator: str = "|") -> str:
+def concatenate_values(
+    values: list[str], shuffle: bool = True, separator: str = "|"
+) -> str:
     assert isinstance(values, list) and isinstance(values[0], str)
     if len(values) == 1:
         return values[0]
@@ -241,31 +253,31 @@ def concatenate_values(values: list[str], shuffle: bool = True, separator: str =
 
 
 def linearize_targets(
-        frame: dict,
-        turn_info: dict,
-        previous_slots: dict,
-        system_utterance: str,
-        user_utterance: str,
-        value_selection_config: DictConfig,
-        lowercase: bool = False,
-        slot_index_separator: Optional[str] = ":",
+    frame: dict,
+    turn_info: dict,
+    previous_slots: dict,
+    system_utterance: str,
+    user_utterance: str,
+    value_selection_config: DictConfig,
+    lowercase: bool = False,
+    slot_index_separator: Optional[str] = ":",
 ):
     service = frame["service"]
     state = frame["state"]
     targets = "[states] "
     # handle cases where annotations contain multiple values
-    if value_selection_config.method == 'heuristic':
+    if value_selection_config.method == "heuristic":
         current_slots = heuristic_slot_value_selection(
             frame, previous_slots, system_utterance, user_utterance
         )  # type: dict[str, str]
-    elif value_selection_config.method == 'concatenate':
+    elif value_selection_config.method == "concatenate":
         current_slots = concatenated_slot_value_selection(
             frame, value_selection_config
         )  # type: dict[str, str]
     else:
         raise ValueError(
             "Unknown argument for value_selection_config! Expected one of 'heuristic' or 'concatenate"
-         )
+        )
     previous_slots[service] = current_slots
 
     # Slot values
@@ -299,15 +311,17 @@ def linearize_targets(
             targets += f"{i} "
 
     # Update
-    turn_info[service]["expected_output"] = targets.strip().lower() if lowercase else targets.strip()
+    turn_info[service]["expected_output"] = (
+        targets.strip().lower() if lowercase else targets.strip()
+    )
 
 
 def generate_description(
-        schema: List[dict],
-        turn: dict,
-        prefix_separators: DictConfig,
-        lowercase: bool = False
-)-> dict:
+    schema: List[dict],
+    turn: dict,
+    prefix_separators: DictConfig,
+    lowercase: bool = False,
+) -> dict:
     services = list(sorted([frame["service"] for frame in turn["frames"]]))
     ordered_services = [s["service_name"] for s in schema]
     assert ordered_services == sorted(ordered_services)
@@ -318,7 +332,9 @@ def generate_description(
             description = ""
             slot_mapping = {}  # maps slot names to indices and indices to slot names
             cat_values_mapping = {}  # nested mapping of from slot to value to index
-            intent_mapping = {}  # maps intent names to indices and indices to intent names
+            intent_mapping = (
+                {}
+            )  # maps intent names to indices and indices to intent names
 
             random.shuffle(service["slots"])
             for i, slot in enumerate(service["slots"]):
@@ -334,14 +350,20 @@ def generate_description(
 
                 if slot["is_categorical"]:
                     # append dontcare to descriptions of categorical slots if this value is possible
-                    if service_name in CATEGORICALS_WITH_DONTCARE_VALUE \
-                            and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service_name] and \
-                            "dontcare" not in slot["possible_values"]:
+                    if (
+                        service_name in CATEGORICALS_WITH_DONTCARE_VALUE
+                        and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service_name]
+                        and "dontcare" not in slot["possible_values"]
+                    ):
                         slot["possible_values"].append("dontcare")
-                    assert len(slot["possible_values"]) == len(set(slot["possible_values"]))
+                    assert len(slot["possible_values"]) == len(
+                        set(slot["possible_values"])
+                    )
                     random.shuffle(slot["possible_values"])
                     cat_values_mapping[slot_name] = {}  # value to index
-                    for index_letter, value in zip(list(string.ascii_lowercase), slot["possible_values"]):
+                    for index_letter, value in zip(
+                        list(string.ascii_lowercase), slot["possible_values"]
+                    ):
                         description += f"{i}{index_letter}) {value} "
                         cat_values_mapping[slot_name][value] = f"{i}{index_letter}"
 
@@ -354,10 +376,12 @@ def generate_description(
                 intent_mapping[f"i{i}"] = intent_name
 
             result[service_name] = {
-                "description": description.strip().lower() if lowercase else description.strip(),
+                "description": description.strip().lower()
+                if lowercase
+                else description.strip(),
                 "slot_mapping": slot_mapping,
                 "cat_values_mapping": cat_values_mapping,
-                "intent_mapping": intent_mapping
+                "intent_mapping": intent_mapping,
             }
             services.pop(0)
             if not services:
@@ -365,21 +389,35 @@ def generate_description(
     return result
 
 
-def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) -> dict:
+def process_file(
+    schema: List[dict],
+    raw_dialogues: list,
+    config: DictConfig,
+    downsample_factor: int = 1,
+    downsample_mode="dialogue",
+) -> dict:
     result = {}
-    lowercase_model_inputs=config.lowercase_model_inputs
+    lowercase_model_inputs = config.lowercase_model_inputs
     try:
         target_slot_index_separator = config.target_slot_index_separator
     except AttributeError:
         logger.info("Defaulting to : separator for slot indices in targets.")
-        target_slot_index_separator = ':'
-    logger.info(f"Selected separator {target_slot_index_separator} for slot indices in targets")
-    for dialogue in raw_dialogues:
+        target_slot_index_separator = ":"
+    logger.info(
+        f"Selected separator {target_slot_index_separator} for slot indices in targets"
+    )
+    for dialogue_idx, dialogue in enumerate(raw_dialogues):
+        if downsample_mode == "dialogue":
+            if dialogue_idx % downsample_factor != 0:
+                continue
         dialogue_id = dialogue["dialogue_id"]
         result[dialogue_id] = []
         system_utterance = ""
         previous_slots = {}
-        for turn in dialogue["turns"]:
+        for turn_idx, turn in enumerate(dialogue["turns"]):
+            if downsample_mode == "turn":
+                if turn_idx % downsample_factor != 0:
+                    continue
             if turn["speaker"] == "SYSTEM":
                 system_utterance = turn["utterance"]
             elif turn["speaker"] == "USER":
@@ -387,7 +425,7 @@ def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) ->
                     schema,
                     turn,
                     config.prefix_separators,
-                    lowercase=lowercase_model_inputs
+                    lowercase=lowercase_model_inputs,
                 )
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
@@ -402,15 +440,22 @@ def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) ->
                         lowercase=config.lowercase_model_targets,
                         slot_index_separator=target_slot_index_separator,
                     )
-                result[dialogue_id].append({
-                    "frames": turn_info,
-                    "system_utterance": system_utterance.lower() if lowercase_model_inputs else system_utterance,
-                    "user_utterance": user_utterance.lower() if lowercase_model_inputs else user_utterance,
-                })
+                result[dialogue_id].append(
+                    {
+                        "frames": turn_info,
+                        "system_utterance": system_utterance.lower()
+                        if lowercase_model_inputs
+                        else system_utterance,
+                        "user_utterance": user_utterance.lower()
+                        if lowercase_model_inputs
+                        else user_utterance,
+                    }
+                )
 
             else:
                 raise ValueError(f"Unknown speaker {turn['speaker']}.")
     return result
+
 
 @click.command()
 @click.option("--quiet", "log_level", flag_value=logging.WARNING, default=True)
@@ -441,16 +486,16 @@ def process_file(schema: List[dict], raw_dialogues: list, config: DictConfig) ->
     type=click.Path(exists=False),
     help="Directory where processed data is output.",
 )
-@click.option('--train', 'split', flag_value='train')
-@click.option('--dev', 'split', flag_value='dev')
-@click.option('--dev_small', 'split', flag_value='dev_small')
-@click.option('--test', 'split', flag_value='test')
+@click.option("--train", "split", flag_value="train")
+@click.option("--dev", "split", flag_value="dev")
+@click.option("--dev_small", "split", flag_value="dev_small")
+@click.option("--test", "split", flag_value="test")
 def main(
-        cfg_path: pathlib.Path,
-        log_level: int,
-        data_paths: tuple[str],
-        output_path: pathlib.Path,
-        split: str,
+    cfg_path: pathlib.Path,
+    log_level: int,
+    data_paths: tuple[str],
+    output_path: pathlib.Path,
+    split: str,
 ):
     logging.basicConfig(
         stream=sys.stdout,
@@ -466,17 +511,26 @@ def main(
     config.metadata.output_path = output_path
     output_path = pathlib.Path(output_path)
     data_paths = [pathlib.Path(p) for p in data_paths]
+
+    try:
+        downsample_factor = config.downsample_factor
+    except AttributeError:
+        downsample_factor = 1
+    try:
+        downsample_mode = config.downsample_mode
+    except AttributeError:
+        downsample_mode = "dialogue"
+    assert downsample_mode in [
+        "dialogue",
+        "turn",
+    ], f"Unknown down-sampling mode {downsample_mode}"
     for shard_path in data_paths:
-        logger.info(
-            f"Preprocessing split {split}, shard {shard_path}"
-        )
+        logger.info(f"Preprocessing split {split}, shard {shard_path}")
         this_shard_data_dir = shard_path.joinpath(split)
         schema_variant = infer_schema_variant_from_path(str(this_shard_data_dir))
-        logger.info(
-            f"Inferred schema variant: {schema_variant}"
-        )
+        logger.info(f"Inferred schema variant: {schema_variant}")
         config.metadata.schema_variant = schema_variant
-        with open(this_shard_data_dir.joinpath("schema.json"), 'r') as f:
+        with open(this_shard_data_dir.joinpath("schema.json"), "r") as f:
             schema = json.load(f)
         pattern = re.compile(r"dialogues_[0-9]+\.json")
         result = {}
@@ -484,9 +538,17 @@ def main(
             if pattern.match(file.name):
                 with open(file, "r") as f:
                     raw_dialogues = json.load(f)
-                result.update(process_file(schema, raw_dialogues, config.preprocessing))
+                result.update(
+                    process_file(
+                        schema,
+                        raw_dialogues,
+                        config.preprocessing,
+                        downsample_factor=downsample_factor,
+                        downsample_mode=downsample_mode,
+                    )
+                )
         save_data(result, output_path.joinpath(schema_variant, split), metadata=config)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
