@@ -324,7 +324,7 @@ def main(
             else:
                 all_checkpoints = all_checkpoints[::freq]
             if not args.decode_steps and reverse:
-                all_checkpoints = reversed(all_checkpoints)
+                all_checkpoints = list(reversed(all_checkpoints))
     else:
         try:
             if checkpoint.exists():
