@@ -1,7 +1,7 @@
 metadata:
-  preprocessing_method: 'd3st_paper_double_pipe_w_new_target_idx_separator'
+  preprocessing_method: 'd3st_paper_double_pipe'
 preprocessing:
-  target_slot_index_separator: "=>"
+  target_slot_index_separator: ":"
   prefix_separators:
     categorical_slots: ':'
     noncategorical_slots: "="
@@ -21,6 +21,10 @@ preprocessing:
     shuffle_before_concat: true
   lowercase_model_inputs: true
   lowercase_model_targets: true
+# only 1 out of downsample_factor dialogues is processed; used to reduce the training data
+# quantity
+downsample_factor: 1
+downsample_mode: 'dialogue'
 reproduce:
   seed: 20220303 # same seed for random, NumPy, PyTorch (CPU/GPU), across devices
   cudnn:
