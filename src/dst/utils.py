@@ -8,18 +8,24 @@ import random
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Union, Optional
+from typing import Optional, Union
 
 import numpy as np
 import torch
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch import nn
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, T5ForConditionalGeneration, T5Tokenizer
+from transformers import (
+    GPT2LMHeadModel,
+    GPT2Tokenizer,
+    T5ForConditionalGeneration,
+    T5Tokenizer,
+)
 
 logger = logging.getLogger(__name__)
 
-_EXPECTED_SCHEMA_VARIANTS = ['v1', 'v2', 'v3', 'v4', 'v5']
-_EXPECTED_SPLITS = ['train', 'test', 'dev', 'dev_small']
+_EXPECTED_SCHEMA_VARIANTS = ["v1", "v2", "v3", "v4", "v5"]
+_EXPECTED_SPLITS = ["train", "test", "dev", "dev_small"]
+
 
 def set_seed(args):
     # For reproduction
@@ -35,7 +41,9 @@ def set_seed(args):
 
 def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     ckpt_path = Path(args.train.checkpoint_dir)
-    ckpt_path = ckpt_path.joinpath(args.train.experiment_name, f"version_{args.data.version}")
+    ckpt_path = ckpt_path.joinpath(
+        args.train.experiment_name, f"version_{args.data.version}"
+    )
     if not ckpt_path.exists():
         ckpt_path.mkdir(exist_ok=True, parents=True)
     save_path = f"{ckpt_path}/model.{step}"
@@ -43,19 +51,21 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     tokenizer.save_pretrained(save_path)
     model.save_pretrained(save_path)
     OmegaConf.save(args, f"{ckpt_path}/model_config.yaml")
-    state_dict = {'optimizer_state_dict': optimizer.state_dict()}
+    state_dict = {"optimizer_state_dict": optimizer.state_dict()}
     if scheduler is not None:
-        state_dict['scheduler_state_dict'] = scheduler.state_dict()
+        state_dict["scheduler_state_dict"] = scheduler.state_dict()
     torch.save(state_dict, os.path.join(save_path, "checkpoint.pth"))
 
 
-def load_model(args: DictConfig, device: Union[torch.device, str], data_parallel: bool = False):
+def load_model(
+    args: DictConfig, device: Union[torch.device, str], data_parallel: bool = False
+):
     ckpt_path = args.checkpoint
     logger.info(f"Load model, tokenizer from {ckpt_path}")
-    if 'gpt2' in args.model_name_or_path.lower():
+    if "gpt2" in args.model_name_or_path.lower():
         tokenizer = GPT2Tokenizer.from_pretrained(ckpt_path)
         model = GPT2LMHeadModel.from_pretrained(ckpt_path)
-    elif 't5' in args.model_name_or_path.lower():
+    elif "t5" in args.model_name_or_path.lower():
         tokenizer = T5Tokenizer.from_pretrained(ckpt_path)
         model = T5ForConditionalGeneration.from_pretrained(ckpt_path)
     else:
@@ -68,25 +78,22 @@ def load_model(args: DictConfig, device: Union[torch.device, str], data_parallel
 
 def load_optimizer_scheduler(ckpt_path: str, optimizer, scheduler):
     checkpoint = torch.load(os.path.join(ckpt_path, "checkpoint.pth"))
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     if scheduler is not None:
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
     return optimizer, scheduler
 
 
-def humanise(
-        name: str,
-        remove_trailing_numbers: bool = False
-) -> str:
+def humanise(name: str, remove_trailing_numbers: bool = False) -> str:
     # Convert a potentially camel or snake case string to a lower case string delimited by spaces
     # Adapted from https://stackoverflow.com/a/1176023
-    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    name = re.sub('([a-z0-9])([A-Z])', r'\1_\2', name)
+    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
     name = name.lower().replace("_", " ")
     if remove_trailing_numbers:
         # Remove trailing numbers
-        name = re.sub('[0-9]+$', '', name)
-    return re.sub(' +', ' ', name).strip()
+        name = re.sub("[0-9]+$", "", name)
+    return re.sub(" +", " ", name).strip()
 
 
 class ServiceSchema(object):
@@ -101,7 +108,6 @@ class ServiceSchema(object):
         self._service_name = schema_json["service_name"]
         self._description = schema_json["description"]
         self._schema_json = schema_json
-
 
         self._intents = sorted(i["name"] for i in schema_json["intents"])
         self._slots = sorted(s["name"] for s in schema_json["slots"])
@@ -206,24 +212,24 @@ class Schema(object):
             json.dump(self._schemas, f, indent=4)
 
 
-def load_schema(data_path: Path) -> Schema:
+def load_schema(data_path: Union[Path, str]) -> Schema:
     return Schema(data_path)
 
 
 def infer_schema_variant_from_path(path: str) -> str:
     """Extracts the schema version from the data path."""
-    match = re.search(r"\bv[1-9]\b", path) # noqa
+    match = re.search(r"\bv[1-9]\b", path)  # noqa
     if match is not None:
-        schema_version = path[match.start():match.end()]
+        schema_version = path[match.start() : match.end()]
         assert schema_version in _EXPECTED_SCHEMA_VARIANTS
     else:
-        schema_version = 'original'
+        schema_version = "original"
     return schema_version
 
 
 def get_data_version(path: pathlib.Path) -> int:
     for elem in path.parts:
-        if 'version' in elem:
+        if "version" in elem:
             return int(elem.split("_")[-1])
     return -1
 
@@ -240,23 +246,25 @@ def infer_split_name_from_path(path: str) -> str:
 
 
 def infer_data_version_from_path(path: str) -> str:
-    match = re.search(r"\bversion_\d+\b", path) # noqa
+    match = re.search(r"\bversion_\d+\b", path)  # noqa
     if match is not None:
-        version = path[match.start():match.end()]
+        version = path[match.start() : match.end()]
     else:
-        logger.warning(
-            f"Could not detect data version in path {path}"
-        )
-        version = ''
+        logger.warning(f"Could not detect data version in path {path}")
+        version = ""
     return version
 
 
-def save_data(data: Union[dict, list], path: Union[Path, str], metadata : Optional[DictConfig] = None):
+def save_data(
+    data: Union[dict, list],
+    path: Union[Path, str],
+    metadata: Optional[DictConfig] = None,
+):
     """Saves data along with the configuration that created it."""
     path = Path(path)
     if path.exists():
         existing_version = sorted(
-            [int(p.name.split("_")[1]) for p in path.iterdir() if 'version' in str(p)]
+            [int(p.name.split("_")[1]) for p in path.iterdir() if "version" in str(p)]
         )  # type: list[int]
         if existing_version:
             version = existing_version[-1] + 1
@@ -268,11 +276,13 @@ def save_data(data: Union[dict, list], path: Union[Path, str], metadata : Option
     path.mkdir(parents=True, exist_ok=True)
 
     if metadata:
-        logger.info(f"Saving data processing info at path {path.joinpath('preprocessing_config.yaml')}")
+        logger.info(
+            f"Saving data processing info at path {path.joinpath('preprocessing_config.yaml')}"
+        )
         metadata.metadata.version = version
         OmegaConf.save(config=metadata, f=path.joinpath("preprocessing_config.yaml"))
     logger.info(f"Saving data at path {path.joinpath('data.json')}")
-    with open(path.joinpath("data.json"), 'w') as f:
+    with open(path.joinpath("data.json"), "w") as f:
         json.dump(data, f, indent=4)
 
 
