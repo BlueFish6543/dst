@@ -453,16 +453,32 @@ def parse_with_context(
         if len(substrings) == 1:
             return substrings
         merge_index_candidates = []
-        target_slot_indices = [
-            int(el.split(target_slot_index_separator)[0]) for el in substrings
+        target_slot_indices = []
+        exclude_indices = []
+        for el_idx, el in enumerate(substrings):
+            try:
+                slot_index = int(el.split(target_slot_index_separator)[0])
+                target_slot_indices.append(slot_index)
+            except ValueError:
+                logger.warning(
+                    f"{dialogue_id}({turn_index}) Could not extract slot index for substring {el}"
+                )
+                exclude_indices.append(el_idx)
+                continue
+        substrings = [
+            substrings[i] for i in range(len(substrings)) if i not in exclude_indices
         ]
-        # merge substrings whose slot index is
+        # predictions might not obey the indexing for the service
         this_service_max_slot_idx = len(slot_value_mapping) // 2 - 1
         invalid_slot_indices = [
             slot_idx
             for slot_idx in target_slot_indices
             if slot_idx > this_service_max_slot_idx
         ]
+        # if all indices are wrong, we return the substrings
+        if invalid_slot_indices == target_slot_indices:
+            return substrings
+        # if some are correct, we attempt to merge strings and return state
         while invalid_slot_indices:
             this_invalid_index = invalid_slot_indices.pop()
             merge_index = target_slot_indices.index(this_invalid_index)
@@ -479,6 +495,8 @@ def parse_with_context(
                 for slot_idx in target_slot_indices
                 if slot_idx > this_service_max_slot_idx
             ]
+            if len(substrings) == 1:
+                break
         if target_slot_indices[:-1] == sorted(
             target_slot_indices[:-1]
         ) and target_slot_indices != sorted(target_slot_indices):
@@ -737,8 +755,9 @@ def parse_with_context(
                         ):
                             new_values = merged_value.split(value_separator)
                             if new_values[0].count(target_slot_index_separator) > 1:
-                                raise ArithmeticError
-                                continue
+                                logger.warning(
+                                    f"First new value {new_values[0]} contained multiple target separators..."
+                                )
                             logger.warning(
                                 f"{dialogue_id}({turn_index}) "
                                 f"Merged multiple values {substrings[i]} with {last_parsed_value} for slot "
@@ -1017,12 +1036,12 @@ def parse(
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
-    only_files = ["dialogues_025.json"]  # noqa
+    only_files = ["dialogues_016.json"]  # noqa
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
             # if file.name not in only_files:
-            #     continue
+            # continue
             logger.info(f"Parsing file {file}.")
             with open(file, "r") as f:
                 dialogue_templates = json.load(f)
