@@ -171,7 +171,7 @@ def decode_checkpoint(
     "-c",
     "--checkpoint",
     "checkpoint",
-    type=click.Path(path_type=Path),
+    type=click.Path(path_type=Path, exists=True),
     help="Optional. Absolute path to checkpoint. Overrides option under args.decode.checkpoint, at least one must be "
     "specified. See also --all flag.",
 )
@@ -240,7 +240,11 @@ def main(
     args.orig_train_schema_path = str(orig_train_schema_path)
     args.override = override
     args.reverse = reverse
-    experiment = args.experiment_name
+    if all:
+        model_config = OmegaConf.load(checkpoint.joinpath("model_config.yaml"))
+    else:
+        model_config = OmegaConf.load(checkpoint.parent.joinpath("model_config.yaml"))
+    experiment = model_config.train.experiment_name
     schema_variant_identifier = infer_schema_variant_from_path(str(test_path))
     data_version = infer_data_version_from_path(str(test_path))
     test_data_version = -1
@@ -289,69 +293,43 @@ def main(
     args.dst_test_path = [str(test_path)]
     logger.info(OmegaConf.to_yaml(args))
     # Decode all checkpoints in a folder sequentially to save the pain on running many commands
-    all_checkpoints = []
     if all:
-        if not checkpoint or not checkpoint.exists():
-            raise ValueError(
-                "Please provide absolute path to the checkpoints directory!"
-            )
-        else:
-            all_checkpoints = [
-                f
-                for f in checkpoint.glob("model*")
-                if "yaml" not in str(f) and "log" not in str(f)
+        all_checkpoints = [
+            f
+            for f in checkpoint.glob("model*")
+            if "yaml" not in str(f) and "log" not in str(f)
+        ]
+        # decode later checkpoints first
+        all_checkpoints.sort(key=lambda x: int(str(x).split(".")[-1]), reverse=False)
+        if args.decode_steps:
+            all_checkpoints_steps = [
+                int(str(el).split(".")[-1]) for el in all_checkpoints
             ]
-            # decode later checkpoints first
-            all_checkpoints.sort(
-                key=lambda x: int(str(x).split(".")[-1]), reverse=False
-            )
-            if args.decode_steps:
-                all_checkpoints_steps = [
-                    int(str(el).split(".")[-1]) for el in all_checkpoints
-                ]
-                filtered_checkpoints = []
-                for step in args.decode_steps:
-                    try:
-                        filtered_checkpoints.append(
-                            all_checkpoints[all_checkpoints_steps.index(step)]
-                        )
-                    except ValueError:
-                        logger.warning(
-                            f"Decoding step {step} specified in configuration file but corresponding checkpoint "
-                            f"not found amongst all checkpoints: __{all_checkpoints}__"
-                        )
-                all_checkpoints = filtered_checkpoints
-            else:
-                all_checkpoints = all_checkpoints[::freq]
-            if not args.decode_steps and reverse:
-                all_checkpoints = list(reversed(all_checkpoints))
+            filtered_checkpoints = []
+            for step in args.decode_steps:
+                try:
+                    filtered_checkpoints.append(
+                        all_checkpoints[all_checkpoints_steps.index(step)]
+                    )
+                except ValueError:
+                    logger.warning(
+                        f"Decoding step {step} specified in configuration file but corresponding checkpoint "
+                        f"not found amongst all checkpoints: __{all_checkpoints}__"
+                    )
+            all_checkpoints = filtered_checkpoints
+        else:
+            all_checkpoints = all_checkpoints[::freq]
+        if not args.decode_steps and reverse:
+            all_checkpoints = list(reversed(all_checkpoints))
     else:
-        try:
-            if checkpoint.exists():
-                assert (
-                    "model." in checkpoint.name
-                ), "Path to model checkpoint should end in /model.*/"
-                all_checkpoints = [checkpoint]
-        except AttributeError:
-            if not args.checkpoint:
-                raise ValueError(
-                    "Checkpoint abs path not provided and path not specified in args.decode.checkpoint!"
-                )
-            elif not Path(args.checkpoint).exists():
-                raise ValueError(
-                    f"No checkpoint exists at {args.checkpoint}. Make sure you provide absolute path!"
-                )
-            else:
-                checkpoint = Path(args.checkpoint)
-                assert (
-                    "model." in checkpoint.name
-                ), "Path to model checkpoint should end in /model.*/"
-                all_checkpoints = [checkpoint]
+        assert (
+            "model." in checkpoint.name
+        ), "Path to model checkpoint should end in /model.*/"
+        all_checkpoints = [checkpoint]
     logger.info(f"Decoding {len(all_checkpoints)} checkpoints")
     # Decode checkpoints sequentially
     for ckpt_number, checkpoint in enumerate(all_checkpoints):
         logger.info(f"Decoding checkpoint {ckpt_number}...")
-        model_config = OmegaConf.load(checkpoint.parent.joinpath("model_config.yaml"))
         config_data_version = model_config.data.version
         inferred_checkpoint_data_version = infer_data_version_from_path(str(checkpoint))
         inferred_checkpoint_data_version = int(
