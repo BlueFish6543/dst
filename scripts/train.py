@@ -8,10 +8,10 @@ from pathlib import Path
 
 import click
 import torch
-from apex.optimizers import FusedAdam
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.nn import CrossEntropyLoss
+from torch.optim import Adam
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -35,6 +35,13 @@ from src.dst.utils import (
     save_checkpoint,
     set_seed,
 )
+
+try:
+    from apex.optimizers import FusedAdam
+
+    AdamW = FusedAdam
+except ModuleNotFoundError:
+    from torch.optim import AdamW
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -373,15 +380,21 @@ def main(
         config, tokenizer, model = set_model(
             args.train, data_parallel=args.train.data_parallel
         )
-    if args.train.optimizer == "adam":
-        optimizer = FusedAdam(
+    if args.train.optimizer == "adamw":
+        optimizer = AdamW(
             model.parameters(), lr=args.train.learning_rate, eps=args.train.adam_eps
+        )
+    elif args.train.optimizer == "adam":
+        optimizer = Adam(
+            model.parameters(),
+            lr=args.train.learning_rate,
         )
     elif args.train.optimizer == "adafactor":
         optimizer = Adafactor(
             model.parameters(),
             lr=args.train.learning_rate,
             relative_step=args.train.relative_step,
+            scale_parameter=args.train.scale_parameter,
         )
     else:
         raise ValueError(f"Unknown optimizer {args.train.optimizer}!")

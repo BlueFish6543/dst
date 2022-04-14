@@ -482,6 +482,9 @@ def parse_with_context(
         while invalid_slot_indices:
             this_invalid_index = invalid_slot_indices.pop()
             merge_index = target_slot_indices.index(this_invalid_index)
+            # unparsable sequence, probably missing index
+            if merge_index == 0:
+                break
             substrings = (
                 substrings[: merge_index - 1]
                 + [f"{substrings[merge_index - 1]} {substrings[merge_index]}"]
@@ -730,11 +733,11 @@ def parse_with_context(
                             and not is_time_prefix(last_parsed_value)
                         ):
                             logger.warning(
-                                f"Skipping merge of slot {parsed_nocat_slots[-1]}, value {last_parsed_value} with "
-                                f"{slot_index_val_pair} since {pair[0]} is a different slot with the same semantics, "
-                                f"{slot_mapping[pair[0]]} "
+                                f"{dialogue_id}({turn_index}) Skipping merge of slot {parsed_nocat_slots[-1]}, "
+                                f"value {last_parsed_value} with "
+                                f"{slot_index_val_pair} since slot {pair[0]} is a different slot with the same "
+                                f"semantics, {slot_mapping[pair[0]]} "
                             )
-                            assert slot_mapping[pair[0]] not in state["slot_values"]
                             if (
                                 value_separator is not None
                                 and value_separator in pair[1]
@@ -743,7 +746,17 @@ def parse_with_context(
                                 value_list = [v.strip() for v in value_list]
                             else:
                                 value_list = [pair[1].strip()]
-                            state["slot_values"][slot_mapping[pair[0]]] = value_list
+                            if slot_mapping[pair[0]] not in state["slot_values"]:
+                                state["slot_values"][slot_mapping[pair[0]]] = value_list
+                            else:
+                                logger.warning(
+                                    f"{dialogue_id}({turn_index}) Found a second value for slot "
+                                    f"{slot_mapping[pair[0]]} with index {pair[0]} in the same prediction. "
+                                    f"Appending to value list."
+                                )
+                                state["slot_values"][slot_mapping[pair[0]]].extend(
+                                    value_list
+                                )
                             logger.warning(
                                 f"Added values {value_list} to slot {slot_mapping[pair[0]]} in the state instead"
                             )
@@ -1015,7 +1028,7 @@ def parse(
                 slot_index_separator_settings.append(target_slot_index_separator)
             target_slot_index_separator = slot_index_separator_settings[0]
             assert len(set(slot_index_separator_settings)) == 1
-        except AttributeError:
+        except (IndexError, AttributeError):
             target_slot_index_separator = ":"
             logger.info(
                 "Could not find attribute target_slot_index_separator in data processing config. "
@@ -1036,12 +1049,12 @@ def parse(
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
-    only_files = ["dialogues_016.json"]  # noqa
+    only_files = ["dialogues_025.json"]  # noqa
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
             # if file.name not in only_files:
-            # continue
+            #     continue
             logger.info(f"Parsing file {file}.")
             with open(file, "r") as f:
                 dialogue_templates = json.load(f)
