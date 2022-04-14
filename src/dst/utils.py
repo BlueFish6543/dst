@@ -290,3 +290,13 @@ def get_datetime() -> str:
     """Returns the current date and time."""
     now = datetime.now()
     return now.strftime("%d/%m/%Y %H:%M:%S")
+
+
+def safeget(dct: dict, *keys: Union[tuple[str], list[str]]):
+    """Retrieves the value of one nested key represented in `keys`"""
+    for key in keys:
+        try:
+            dct = dct[key]
+        except KeyError:
+            return None
+    return dct
