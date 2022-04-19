@@ -22,6 +22,7 @@ from transformers import (
     GPT2Tokenizer,
     T5ForConditionalGeneration,
     T5Tokenizer,
+    get_constant_schedule_with_warmup,
     get_linear_schedule_with_warmup,
 )
 
@@ -119,6 +120,7 @@ def compute_dev_lm_loss(args, dataloader, model) -> dict[str, float]:
                 unseen_loss_total += unseen_loss
         loss_total += output.loss.item()
     logger.info(f"Took {time.time() - start_time:.3f} to evaluate dev likelihood")
+    torch.cuda.empty_cache()
     return {
         "dev_avg_token_batch": loss_total / num_batches,
         "dev_seen_per_token": seen_loss_total / total_seen_tokens,
@@ -192,6 +194,13 @@ def train(
                 if train_args.use_scheduler:
                     scheduler.step()
                 optimizer.zero_grad()
+            if scheduler is not None:
+                if global_step % train_args.lr_log_freq == 0:
+                    lrs = scheduler.get_lr()
+                    assert len(lrs) == 1
+                    writer.add_scalar(
+                        "lr", lrs[0], global_step=global_step * train_args.batch_size
+                    )
             if global_step % eval_step == 0:
                 dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
                 for subset, value in dev_losses.items():
@@ -212,6 +221,7 @@ def train(
                     global_step * train_args.batch_size,
                     optimizer,
                     scheduler,
+                    global_step,
                 )
                 model.train()
             if global_step in train_args.global_step_checkpoints:
@@ -222,6 +232,7 @@ def train(
                     global_step * train_args.batch_size,
                     optimizer,
                     scheduler,
+                    global_step,
                 )
         loss_disp /= local_step + 1
         logger.info(
@@ -419,17 +430,32 @@ def main(
     )
     scheduler = None
     if args.train.use_scheduler:
-        t_total = (
-            len(train_dataloader)
-            // args.train.gradient_accumulation_steps
-            * args.train.epochs
-        )
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=args.train.warmup_steps,
-            num_training_steps=t_total,
-        )
-    if ckpt_path:
+        if args.train.optimizer in ["adam", "adamw"]:
+            t_total = (
+                len(train_dataloader)
+                // args.train.gradient_accumulation_steps
+                * args.train.epochs
+            )
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=args.train.warmup_steps,
+                num_training_steps=t_total,
+            )
+        else:
+            try:
+                assert not all((args.train.relative_step, args.train.scale_parameter))
+            except AssertionError:
+                logger.error(
+                    "Cannot use scheduler with Adafactor optimizer is automatic LR scheduling is enabled."
+                    "Set training arguments `relative_step` and `scale_paramater` to `false`"
+                )
+                raise AssertionError
+            scheduler = get_constant_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=args.train.warmup_steps
+                * args.train.gradient_accumulation_steps,
+            )
+    if ckpt_path is not None:
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
     train(
         args,
