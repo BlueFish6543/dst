@@ -423,7 +423,14 @@ def parse_with_context(
         ):
             return False
 
-        penultimate_value = substrings[0].split(target_slot_index_separator, 1)[1]
+        try:
+            penultimate_value = substrings[0].split(target_slot_index_separator, 1)[1]
+        except IndexError:
+            logger.warning(
+                f"{dialogue_id}({turn_index}) Invalid first substring {substrings[0]} generated as part of "
+                f"{predicted_str}"
+            )
+            return False
         if value_separator is not None and value_separator in penultimate_value:
             penultimate_value = penultimate_value.split(value_separator)[-1]
         trailing_values = [substrings[1]]
@@ -1049,7 +1056,7 @@ def parse(
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
-    only_files = ["dialogues_025.json"]  # noqa
+    only_files = ["dialogues_014.json"]  # noqa
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
