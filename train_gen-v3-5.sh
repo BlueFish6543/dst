@@ -10,19 +10,19 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J train
+#SBATCH -J d3st_oracle_train
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
-#SBATCH -A BYRNE-SL2-GPU
+#SBATCH -A GASIC-BHT26-SL2-GPU
 #! How many whole nodes should be allocated?
 #SBATCH --nodes=1
 #! How many (MPI) tasks will there be in total?
 #! Note probably this should not exceed the total number of GPUs in use.
-#SBATCH --ntasks=4
+#SBATCH --ntasks=1
 #! Specify the number of GPUs per node (between 1 and 4; must be 4 if nodes>1).
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:1
 #! How much wallclock time will be required?
-#SBATCH --time=12:00:00
+#SBATCH --time=36:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
 #! Uncomment this to prevent the job from being requeued (e.g. if
@@ -55,16 +55,24 @@ module load rhel8/default-amp              # REQUIRED - loads the basic environm
 module load python/3.8
 module load miniconda/3
 eval "$(conda shell.bash hook)"
-conda activate /home/zxc22/.conda/envs/dst
+conda activate /home/ac2123/anaconda3/envs/dst
 which python
 
 #! Full path to application executable:
-application="python -u -m scripts.train"
+application="python -m scripts.train"
 
 #! Run options for the application:
-options="-t data/preprocessed/sgd/d3st/train.json \
--d data/preprocessed/sgd/d3st/dev.json \
--a configs/train_arguments.yaml -vv"
+options="-s /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/raw/sgd/train/schema.json \
+-d /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/original/dev/version_3/data.json \
+-t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/original/train/version_3/data.json \
+-t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/v1/train/version_3/data.json \
+-t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/v2/train/version_3/data.json \
+-t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/v3/train/version_3/data.json \
+-t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/v4/train/version_3/data.json \
+-t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/v5/train/version_3/data.json \
+-a configs/train_arguments.yaml -vvv"
+
+
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
