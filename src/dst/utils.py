@@ -6,9 +6,11 @@ import os
 import pathlib
 import random
 import re
+from collections import defaultdict
 from datetime import datetime
+from operator import methodcaller
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -39,7 +41,7 @@ def set_seed(args):
     torch.backends.cudnn.benchmark = args.cudnn.benchmark
 
 
-def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
+def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler, global_step):
     ckpt_path = Path(args.train.checkpoint_dir)
     ckpt_path = ckpt_path.joinpath(
         args.train.experiment_name, f"version_{args.data.version}"
@@ -54,6 +56,7 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler):
     state_dict = {"optimizer_state_dict": optimizer.state_dict()}
     if scheduler is not None:
         state_dict["scheduler_state_dict"] = scheduler.state_dict()
+        state_dict["scheduler_last_epoch"] = global_step
     torch.save(state_dict, os.path.join(save_path, "checkpoint.pth"))
 
 
@@ -81,6 +84,10 @@ def load_optimizer_scheduler(ckpt_path: str, optimizer, scheduler):
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     if scheduler is not None:
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        try:
+            scheduler.last_epoch = checkpoint["scheduler_last_epoch"]
+        except KeyError:
+            logger.warning("Could not find key scheduler_last_epoch in state dict")
     return optimizer, scheduler
 
 
@@ -259,22 +266,40 @@ def save_data(
     data: Union[dict, list],
     path: Union[Path, str],
     metadata: Optional[DictConfig] = None,
+    version: Optional[int] = None,
+    override: bool = False,
 ):
-    """Saves data along with the configuration that created it."""
+    """Saves data along with the configuration that created it.
+
+    Args:
+        override:
+        version:
+    """
     path = Path(path)
-    if path.exists():
-        existing_version = sorted(
-            [int(p.name.split("_")[1]) for p in path.iterdir() if "version" in str(p)]
-        )  # type: list[int]
-        if existing_version:
-            version = existing_version[-1] + 1
+    if version is None:
+        if path.exists():
+            existing_version = sorted(
+                [
+                    int(p.name.split("_")[1])
+                    for p in path.iterdir()
+                    if "version" in str(p)
+                ]
+            )  # type: list[int]
+            if existing_version:
+                version = existing_version[-1] + 1
+            else:
+                version = 1
         else:
             version = 1
-    else:
-        version = 1
     path = path.joinpath(f"version_{version}")
+    if path.exists():
+        if not override:
+            logger.warning(
+                f"Cannot override predictions for {path}, existing data will not be overwritten. "
+                f"Use --override flag to achieve this behaviour."
+            )
+            return
     path.mkdir(parents=True, exist_ok=True)
-
     if metadata:
         logger.info(
             f"Saving data processing info at path {path.joinpath('preprocessing_config.yaml')}"
@@ -300,3 +325,29 @@ def safeget(dct: dict, *keys: Union[tuple[str], list[str]]):
         except KeyError:
             return None
     return dct
+
+
+def aggregate_values(mapping: dict, agg_fcn: Literal["mean", "prod"]):
+    """Aggregates the values of the input (nested) mapping according to the
+    specified aggregation method. This function modifies the input in place.
+
+    Parameters
+    ---------
+    mapping
+        The mapping to be aggregated.
+    agg_fcn
+        Aggregation function. Only  `mean` or `prod` aggregation supported.
+    """
+
+    for key, value in mapping.items():
+        if isinstance(value, dict):
+            aggregate_values(mapping[key], agg_fcn)
+        else:
+            aggregator = methodcaller(agg_fcn, value)
+            mapping[key] = aggregator(np)
+
+
+def default_to_regular(d: defaultdict) -> dict:
+    if isinstance(d, defaultdict):
+        d = {k: default_to_regular(v) for k, v in d.items()}
+    return d
