@@ -486,6 +486,18 @@ def process_file(
     type=click.Path(exists=False),
     help="Directory where processed data is output.",
 )
+@click.option(
+    "-ver",
+    "--version",
+    "version",
+    default=None,
+    help="By default, the version is incremented automatically when the pre-processing script"
+    " is run. Use this option when you pre-process data with a given data format for different"
+    "experiments to avoid version discrepancies and errors while decoding.",
+)
+@click.option(
+    "--override", is_flag=True, default=False, help="Override previous results."
+)
 @click.option("--train", "split", flag_value="train")
 @click.option("--dev", "split", flag_value="dev")
 @click.option("--dev_small", "split", flag_value="dev_small")
@@ -495,7 +507,9 @@ def main(
     log_level: int,
     data_paths: tuple[str],
     output_path: pathlib.Path,
+    override: bool,
     split: str,
+    version: Optional[int],
 ):
     logging.basicConfig(
         stream=sys.stdout,
@@ -530,6 +544,11 @@ def main(
         schema_variant = infer_schema_variant_from_path(str(this_shard_data_dir))
         logger.info(f"Inferred schema variant: {schema_variant}")
         config.metadata.schema_variant = schema_variant
+        if shard_path.joinpath(f"{split}_generator_config.yaml").exists():
+            gen_config = OmegaConf.load(
+                shard_path.joinpath(f"{split}_generator_config.yaml")
+            )
+            config.metadata.generator = gen_config
         with open(this_shard_data_dir.joinpath("schema.json"), "r") as f:
             schema = json.load(f)
         pattern = re.compile(r"dialogues_[0-9]+\.json")
@@ -547,7 +566,13 @@ def main(
                         downsample_mode=downsample_mode,
                     )
                 )
-        save_data(result, output_path.joinpath(schema_variant, split), metadata=config)
+        save_data(
+            result,
+            output_path.joinpath(schema_variant, split),
+            metadata=config,
+            version=version,
+            override=override,
+        )
 
 
 if __name__ == "__main__":
