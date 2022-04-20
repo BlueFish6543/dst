@@ -971,6 +971,7 @@ def parse(
     value_separator: Optional[str] = None,
     recase_categorical_values: Optional[bool] = None,
     target_slot_index_separator: Optional[str] = None,
+    file_to_parse: Optional[str] = None,
 ):
     model_name = experiment_config.decode.model_name_or_path
     try:
@@ -1056,12 +1057,11 @@ def parse(
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
-    only_files = ["dialogues_014.json"]  # noqa
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
-            # if file.name not in only_files:
-            #     continue
+            if file_to_parse is not None and file.name != file_to_parse:
+                continue
             logger.info(f"Parsing file {file}.")
             with open(file, "r") as f:
                 dialogue_templates = json.load(f)
