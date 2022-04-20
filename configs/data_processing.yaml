@@ -1,9 +1,9 @@
 metadata:
-  preprocessing_method: 'd3st_paper_double_pipe'
+  preprocessing_method: 'd3st_paper_except_dontcare'
 preprocessing:
-  target_slot_index_separator: ":"
+  target_slot_index_separator: "="
   prefix_separators:
-    categorical_slots: ':'
+    categorical_slots: '='
     noncategorical_slots: "="
     intents: "="
   special_tokens:
@@ -18,7 +18,7 @@ preprocessing:
     method: "concatenate"
     value_separator: " || "
     # changes the order wrt annotation before concatenation
-    shuffle_before_concat: true
+    shuffle_before_concat: false
   lowercase_model_inputs: true
   lowercase_model_targets: true
 # only 1 out of downsample_factor dialogues is processed; used to reduce the training data
