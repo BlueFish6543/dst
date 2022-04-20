@@ -286,7 +286,7 @@ time_slots = {
 help correctly merge the values after initial splitting."""
 CATEGORICAL_SPECIAL_VALUES = {"dontcare"}
 """Use to suppress warnings."""
-UNAMBIGUOUS_TARGET_SEPARATORS = {"=>"}
+UNAMBIGUOUS_TARGET_SEPARATORS = {"=>", "="}
 """Separators which do not result in sequences with multiple parses.
 Used to call a parsing algorithm which does not use context to handle
 ambiguous parses.
