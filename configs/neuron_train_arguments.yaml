@@ -12,11 +12,11 @@ train:
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
   batch_size: 4
   gradient_accumulation_steps: 8 # gradients applied every this many batches to the output
-  use_scheduler: false
-  warmup_steps: 0 # for LR scheduling; scaled by gradient accumulation steps internally for Adafactor opt only; otherwise not
+  use_scheduler: true
+  warmup_steps: 4000 # for LR scheduling; scaled by gradient accumulation steps internally for Adafactor opt only; otherwise not
   learning_rate: 1e-4
   adam_eps: 1e-7
-  optimizer: 'adamw'
+  optimizer: 'adafactor'
   relative_step: false # AdaFactor optimizer
   scale_parameter: false # AdaFactor optimizer
   fp16: false # use float16 in training
@@ -24,14 +24,15 @@ train:
   # Path where checkpoints are *saved*
   checkpoint_dir: 'models'
   # If populated, the checkpoints are saved under checkpoint_dir/experiment_name
-  experiment_name: 'seed_${..reproduce.seed}_default'
+  experiment_name: 'seed_${..reproduce.seed}_test_adafactor_updates'
   # Populate if the training is restarted from checkpoint
   checkpoint: ''
   verbose:
     disable_display: false
   data_parallel: false
   # Use this to save a model checkpoint after a specified number of batches
-  global_step_checkpoints: []
+  global_step_checkpoints: [30000, 50000]
+  lr_log_freq: 50
 
 dev:
   model_name_or_path: 'google/t5-v1_1-base'
@@ -39,12 +40,12 @@ dev:
   decoder_max_seq_len: 512
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
   eval_interval: 40000  # number of examples after which the model is evaluated
-  batch_size: 32
+  batch_size: 8
   verbose:
     disable_display: false
 
 reproduce:
-  seed: 45 # same seed for random, NumPy, PyTorch (CPU/GPU), across devices
+  seed: 20220303 # same seed for random, NumPy, PyTorch (CPU/GPU), across devices
   cudnn:
     enabled: True
     deterministic: False
