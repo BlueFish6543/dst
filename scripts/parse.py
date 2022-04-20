@@ -6,7 +6,7 @@ import pathlib
 import sys
 from distutils.dir_util import copy_tree
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import click
 from omegaconf import OmegaConf
@@ -65,6 +65,16 @@ logger = logging.getLogger(__name__)
     "Used to retrieve mappings from indices to slot/intent names which are required to"
     "recover slot names from predicted indices",
 )
+@click.option(
+    "-f",
+    "--file",
+    "file_to_parse",
+    type=str,
+    default=None,
+    help="Which file to parse. Possible file names are all files listed under dialogue templates,"
+    "that is, the filenames are the same as the SGD train/dev/test dialogue files. For example,"
+    "passing 'dialogues_001.json' will parse predictions for the dialogues in the corresponding files..",
+)
 def main(
     belief_path: pathlib.Path,
     schema_path: pathlib.Path,
@@ -72,6 +82,7 @@ def main(
     dialogue_templates: pathlib.Path,
     test_path: pathlib.Path,
     log_level: int,
+    file_to_parse: Optional[str],
 ):
 
     if output_dir is None:
@@ -114,7 +125,14 @@ def main(
         preprocessed_refs = preprocessed_refs["data"]
     except KeyError:
         pass
-    parse(schema, predictions, preprocessed_refs, output_dir, experiment_config)
+    parse(
+        schema,
+        predictions,
+        preprocessed_refs,
+        output_dir,
+        experiment_config,
+        file_to_parse=file_to_parse,
+    )
 
 
 if __name__ == "__main__":
