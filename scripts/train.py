@@ -37,6 +37,14 @@ from src.dst.utils import (
     set_seed,
 )
 
+LR_LOG_FREQ_CHANGE_LIMIT = 128000
+"""LR is logged with freq specified in train args until
+this many examples have been seen."""
+LR_LOG_FREQ_BATCHES = 2500
+"""LR logged when batch number divisible by this after
+LR_LOG_FREQ_CHANGE_LIMIT is exceeded."""
+
+
 try:
     from apex.optimizers import FusedAdam
 
@@ -194,9 +202,16 @@ def train(
                 if train_args.use_scheduler:
                     scheduler.step()
                 optimizer.zero_grad()
+            log_lr = False
             if scheduler is not None:
-                if global_step % train_args.lr_log_freq == 0:
-                    lrs = scheduler.get_lr()
+                if global_step * train_args.batch_size > LR_LOG_FREQ_CHANGE_LIMIT:
+                    if global_step % LR_LOG_FREQ_BATCHES == 0:
+                        log_lr = True
+                else:
+                    if global_step % train_args.lr_log_freq == 0:
+                        log_lr = True
+                if log_lr:
+                    lrs = scheduler.get_last_lr()
                     assert len(lrs) == 1
                     writer.add_scalar(
                         "lr", lrs[0], global_step=global_step * train_args.batch_size
@@ -451,9 +466,7 @@ def main(
                 )
                 raise AssertionError
             scheduler = get_constant_schedule_with_warmup(
-                optimizer,
-                num_warmup_steps=args.train.warmup_steps
-                * args.train.gradient_accumulation_steps,
+                optimizer, num_warmup_steps=args.train.warmup_steps
             )
     if ckpt_path is not None:
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
