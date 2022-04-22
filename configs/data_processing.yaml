@@ -1,5 +1,5 @@
 metadata:
-  preprocessing_method: 'd3st_paper_except_dontcare'
+  preprocessing_method: 'd3st_paper'
 preprocessing:
   target_slot_index_separator: "="
   prefix_separators:
@@ -13,12 +13,22 @@ preprocessing:
     - "[intents]"
     - "[req_slots]"
   # choose between "heuristic" (carries over values that have been said before)
-  # and "concatenate" which forms a string "val_1|val_2" from a list [val_1,val_2]
+  # and "concatenate" which forms a string "val_1{value_separator}val_2"
+  # from a list [val_1, val_2]
   value_selection:
     method: "concatenate"
     value_separator: " || "
     # changes the order wrt annotation before concatenation
     shuffle_before_concat: false
+  # valid options are 'qa_option' and 'predict_dontcare'. Consider the turn
+  # 'I don't care if the flight is non-stop' and assume that the num_stops
+  # slot can take values 0 and 1. Assume the index 0 is assigned to num_stops.
+  # Then:
+  # `predict_dontcare`: 0: number of stops the flight makes 1a) 0 1b) 1 ... [usr]
+  #    I don't care if the flight is non-stop. => [states] 1:dontcare ...
+  # `qa_option`: 0: number of stops the flight makes 1a) 0 1b) 1 1c) dontcare ...
+  # [usr] I don't care if the flight is non-stop. =? [states] 1:dontcare
+  dontcare_handling: 'predict_dontcare'
   lowercase_model_inputs: true
   lowercase_model_targets: true
 # only 1 out of downsample_factor dialogues is processed; used to reduce the training data
