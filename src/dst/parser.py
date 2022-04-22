@@ -172,8 +172,8 @@ def parse_predicted_string(
 def parse_categorical_slot(
     state: dict,
     service: str,
-    slot: str,
-    slot_value_pair: list[str, str],
+    slot_name: str,
+    slot_index_value_pair: list[str, str],
     predicted_str: str,
     cat_values_mapping: dict,
     restore_categorical_case: bool = False,
@@ -183,25 +183,31 @@ def parse_categorical_slot(
         restore_case, restore_categorical_case=restore_categorical_case
     )
     # Invert the mapping to get the categorical value
-    if slot not in cat_values_mapping:
+    if slot_name not in cat_values_mapping:
         logger.warning(
-            f"{dialogue_id}({turn_index}): Could not find slot {slot} in categorical mapping. \n"
+            f"{dialogue_id}({turn_index}): Could not find slot {slot_name} in categorical mapping. \n"
             f"Categorical slots for service {service} are {cat_values_mapping.keys()}."
         )
         return
-    for categorical_value, categorical_value_idx in cat_values_mapping[slot].items():
-        if categorical_value_idx == slot_value_pair[1].strip():
+    predicted_value = slot_index_value_pair[1].strip()
+    for categorical_value, categorical_value_idx in cat_values_mapping[
+        slot_name
+    ].items():
+        if categorical_value_idx == predicted_value:
             recased_value = recase(value=categorical_value, service=service)
             assert isinstance(recased_value, str)
-            state["slot_values"][slot] = [recased_value]
+            state["slot_values"][slot_name] = [recased_value]
             break
     else:
-        logger.warning(
-            f"{dialogue_id}({turn_index}): "
-            f"Could not lookup categorical value {slot_value_pair[1].strip()} "
-            f"for slot {slot_value_pair[0].strip()} in {predicted_str}. \n"
-            f"Values defined for this slot were {cat_values_mapping[slot]}"
-        )
+        if predicted_value == "dontcare":
+            state["slot_values"][slot_name] = ["dontcare"]
+        else:
+            logger.warning(
+                f"{dialogue_id}({turn_index}): "
+                f"Could not lookup categorical value {slot_index_value_pair[1].strip()} "
+                f"for slot {slot_index_value_pair[0].strip()} in {predicted_str}. \n"
+                f"Values defined for this slot were {cat_values_mapping[slot_name]}"
+            )
 
 
 def select_using_context(
