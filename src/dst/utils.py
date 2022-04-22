@@ -327,7 +327,9 @@ def safeget(dct: dict, *keys: Union[tuple[str], list[str]]):
     return dct
 
 
-def aggregate_values(mapping: dict, agg_fcn: Literal["mean", "prod"]):
+def aggregate_values(
+    mapping: dict, agg_fcn: Literal["mean", "prod"], reduce: bool = True
+):
     """Aggregates the values of the input (nested) mapping according to the
     specified aggregation method. This function modifies the input in place.
 
@@ -337,14 +339,36 @@ def aggregate_values(mapping: dict, agg_fcn: Literal["mean", "prod"]):
         The mapping to be aggregated.
     agg_fcn
         Aggregation function. Only  `mean` or `prod` aggregation supported.
+    reduce
+        If False, the aggregator will keep the first dimension of the value to be aggregated.
+
+
+    Example
+    -------
+    >>> mapping = {'a': {'b': [[1, 2], [3, 4]]}}
+    >>> agg_fcn = 'mean'
+    >>> aggregate_values(mapping, agg_fcn, reduce=False)
+    >>> {'a': {'b': [1.5, 3.5]}}
+
     """
 
     for key, value in mapping.items():
         if isinstance(value, dict):
-            aggregate_values(mapping[key], agg_fcn)
+            aggregate_values(mapping[key], agg_fcn, reduce=reduce)
         else:
-            aggregator = methodcaller(agg_fcn, value)
-            mapping[key] = aggregator(np)
+            if reduce:
+                aggregator = methodcaller(agg_fcn, value)
+                mapping[key] = aggregator(np)
+            else:
+                if isinstance(mapping[key], list) and isinstance(mapping[key][0], list):
+                    agg_res = []
+                    for val in mapping[key]:
+                        aggregator = methodcaller(agg_fcn, val)
+                        agg_res.append(aggregator(np))
+                    mapping[key] = agg_res
+                else:
+                    aggregator = methodcaller(agg_fcn, value)
+                    mapping[key] = aggregator(np)
 
 
 def default_to_regular(d: defaultdict) -> dict:
