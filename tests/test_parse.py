@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from dst.evaluation import get_metrics
 from dst.parser import parse
-from dst.scoring_utils import get_dataset_as_dict, get_in_domain_services
+from dst.scoring_utils import get_evaluator_inputs, get_in_domain_services
 from dst.utils import Schema
 
 logger = logging.getLogger(__name__)
@@ -103,20 +103,9 @@ def reformat_references(preprocessed_references: dict) -> dict:
     return predictions
 
 
-def get_metrics_inputs(hyp_path: pathlib.Path, ref_path: pathlib.Path):
-
-    hyp_data = get_dataset_as_dict(
-        str(hyp_path.joinpath("dialogues_*.json")),
-    )
-    ref_data = get_dataset_as_dict(
-        str(ref_path.joinpath("dialogues_*.json")),
-    )
-    data = {"dataset_hyp": hyp_data, "dataset_ref": ref_data}
-    return data
-
-
+# MODEL_INPUT_DATA_VERSION = ["version_3"]
 # MODEL_INPUT_DATA_VERSION = ['version_5']
-MODEL_INPUT_DATA_VERSION = ["version_3"]
+MODEL_INPUT_DATA_VERSION = ["version_7"]
 VARIANTS = ["original", "v1", "v2", "v3", "v4", "v5"]
 SPLITS = ["train", "dev", "test"]
 
@@ -190,7 +179,7 @@ def test_parse(
         recase_categorical_values=recase_categorical_values,
         target_slot_index_separator=target_slot_index_separator,
     )
-    test_data = get_metrics_inputs(
+    test_data = get_evaluator_inputs(
         parser_output_dir, SCHEMA_PATH_ROOT.joinpath(variant, split)
     )
     hyps, refs = test_data["dataset_hyp"], test_data["dataset_ref"]

@@ -1,5 +1,6 @@
 import glob
 import json
+import pathlib
 
 from absl import logging
 
@@ -40,3 +41,15 @@ def get_service_set(schema_path):
 def get_in_domain_services(schema_path_1, schema_path_2):
     """Get the set of common services between two schemas."""
     return get_service_set(schema_path_1) & get_service_set(schema_path_2)
+
+
+def get_evaluator_inputs(hyp_path: pathlib.Path, ref_path: pathlib.Path):
+
+    hyp_data = get_dataset_as_dict(
+        str(hyp_path.joinpath("dialogues_*.json")),
+    )
+    ref_data = get_dataset_as_dict(
+        str(ref_path.joinpath("dialogues_*.json")),
+    )
+    data = {"dataset_hyp": hyp_data, "dataset_ref": ref_data}
+    return data
