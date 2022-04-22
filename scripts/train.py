@@ -340,13 +340,13 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     type=click.Path(exists=True, path_type=Path),
     help="Path to the checkpoint folder from where the model is to be loaded.",
 )
-# inference arguments
 @click.option(
     "--run_inference",
     is_flag=True,
     default=False,
     help="Evaluate task-oriented performance on dev set.",
 )
+# decoder args
 @click.option(
     "--override",
     is_flag=True,
@@ -359,7 +359,23 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     "hyp_dir",
     type=click.Path(path_type=Path),
     help="Dir where hypothesis files are to be saved. "
-    "Auto-suffixed with args.decode.experiment_name model checkpoint binary name.",
+    "Auto-suffixed with checkpoint step number.",
+)
+@click.option(
+    "-templates",
+    "--dialogue_templates",
+    "dialogue_templates",
+    type=click.Path(exists=True, path_type=Path),
+    help="Absolute to the directory containing blank dialogue files for the dev set.",
+)
+# necessary for scoring
+@click.option(
+    "-ref",
+    "--ref-dir",
+    "ref_dir",
+    type=click.Path(path_type=Path),
+    help="Dir where the references files for task-oriented eval are saved."
+    "Necessary to evaluate task-oriented performance during training.",
 )
 def main(
     args_path: pathlib.Path,
@@ -371,6 +387,8 @@ def main(
     run_inference: bool,
     override: bool,
     hyp_dir: pathlib.Path,
+    ref_dir: pathlib.Path,
+    dialogue_templates: pathlib.Path,
 ):
     args = OmegaConf.load(args_path)
     set_seed(args.reproduce)
@@ -391,6 +409,11 @@ def main(
     args.train.dst_train_path = [str(p) for p in train_path]  # type: list[str]
     args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
     args.train.orig_train_schema_path = orig_train_schema_path
+    if run_inference:
+        assert ref_dir.joinpath("schema.json").exists()
+        args.decode.schema_path = str(ref_dir.joinpath("schema.json"))
+        args.decode.ref_path = str(ref_dir)
+        args.decode.template_path = str(dialogue_templates)
 
     log_dir = (
         Path(args.train.checkpoint_dir)
@@ -500,7 +523,6 @@ def main(
     if ckpt_path is not None:
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
     inference_config, inference_data_loader = None, None
-
     if run_inference:
         inference_config = setup_inference_config(args, hyp_dir, override)
         logger.info("Inference config...")
