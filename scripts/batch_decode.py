@@ -69,7 +69,7 @@ def decode(args, batch, model, tokenizer) -> list[str]:
     return remove_padding(output_strings, tokenizer.pad_token)
 
 
-def test(args, tokenizer, model):
+def run_inference(args, tokenizer, model):
     train_schema = load_schema(args.orig_train_schema_path)
     dataset = BatchedTestDataset(
         args, tokenizer, args.dst_test_path, args.data_size, train_schema
@@ -141,7 +141,7 @@ def decode_checkpoint(
         f"Decoding {str(ckpt_path)}. Saving dialogues and belief states to {hyp_path}"
     )
     _, tokenizer, model = load_model(args, device=DEVICE)
-    belief_states = test(args, tokenizer, model)
+    belief_states = run_inference(args, tokenizer, model)
     with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
         json.dump(belief_states, f, indent=4)
     return belief_states
@@ -202,7 +202,6 @@ def decode_checkpoint(
     "--reverse_decode",
     "reverse",
     is_flag=True,
-    default=True,
     help="When multiple checkpoints are decoded, it ensures that later models decode first. This option "
     "does not have any effect if the decode_steps is option is specified in the configuration file. "
     "Use that option if you require that checkpoints are decoded in a specific order.",
