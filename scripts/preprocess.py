@@ -153,6 +153,7 @@ CATEGORICALS_WITH_DONTCARE_VALUE = {
     "Travel_15": ["category"] + ["type_of_attraction"],
 }
 ALPHA_NUMERIC_SLOT_EXCEPTIONS = {"movie_rating_out_of_10"}
+_DONTCARE_HANDLING_OPTIONS = {"predict_dontcare", "qa_option"}
 
 
 def has_alphanumeric_words(
@@ -261,7 +262,53 @@ def linearize_targets(
     value_selection_config: DictConfig,
     lowercase: bool = False,
     slot_index_separator: Optional[str] = ":",
+    dontcare_handling="qa_option",
 ):
+    """
+    Create a target sequence from dialogue annotations.
+
+    Parameters
+    -----------
+    frame
+        The frame currently processed, extracted from SGD-corpus
+    turn_info
+        A dictionary with the following format::
+
+            {
+                service_name: str
+                {
+                    'description': str
+                    'slot_mapping': dict[Union[int, str], Union[str, int]]
+                    'intent_mapping': dict[Union[int, str], Union[str, int]]
+                    'cat_mapping': dict[str, dict[str, str]]
+
+                }
+
+            }
+
+            where:
+
+                - `slot_mapping` maps all slot names to slot indices and slot indices to slot names.
+
+                - `cat_mapping` maps the slot name to a mapping of slot values to slot value indices (e.g., 2a, 2b, ...)
+                for each categorical slot
+
+                - `intent_mapping` maps the intent names to intent indices and intent indices to indent names
+    previous_slots:
+        Dialogue state at previous turn. Derived from annotation so that only one value is kept or all values
+        are concatenated as described in the options in `value_selection_config`.
+    system_utterance, user_utterance
+        Last utterances said by SYSTEM and USER.
+    value_selection_config
+        Configuration options for value selection
+    lowercase
+        If True, targets are lowercased.
+    slot_index_separator
+        Symbol separating slot indices and values.
+    dontcare_handling:
+        If `predict_dontcare` then `dontcare` is included in the target as a string and not as a QA option in the
+        description.
+    """
     service = frame["service"]
     state = frame["state"]
     targets = "[states] "
@@ -279,22 +326,29 @@ def linearize_targets(
             "Unknown argument for value_selection_config! Expected one of 'heuristic' or 'concatenate"
         )
     previous_slots[service] = current_slots
-
     # Slot values
     slot_mapping = turn_info[service]["slot_mapping"]
     cat_values_mapping = turn_info[service]["cat_values_mapping"]
     this_service_expected_indices = []
     for i in range(len(slot_mapping) // 2):
-        slot = slot_mapping[i]
-        if slot not in ALPHA_NUMERIC_SLOT_EXCEPTIONS:
-            assert not has_alphanumeric_words(slot)
-        if slot in current_slots:
-            # Active
-            if slot in cat_values_mapping:
-                targets += f"{i}{slot_index_separator}{cat_values_mapping[slot][current_slots[slot]]} "
+        slot_name = slot_mapping[i]
+        if slot_name not in ALPHA_NUMERIC_SLOT_EXCEPTIONS:
+            assert not has_alphanumeric_words(slot_name)
+        if slot_name in current_slots:
+            if slot_name in cat_values_mapping:
+                value_mapping = cat_values_mapping[slot_name]
+                current_slot_value = current_slots[slot_name]
+                if current_slot_value == "dontcare":
+                    if dontcare_handling == "predict_dontcare":
+                        assert "dontcare" not in value_mapping.values()
+                        targets += f"{i}{slot_index_separator}dontcare"
+                        continue
+                targets += (
+                    f"{i}{slot_index_separator}{value_mapping[current_slot_value]} "
+                )
             else:
                 # Non-categorical
-                targets += f"{i}{slot_index_separator}{current_slots[slot]} "
+                targets += f"{i}{slot_index_separator}{current_slots[slot_name]} "
             this_service_expected_indices.append(i)
     turn_info[service]["target_slot_indices"] = this_service_expected_indices
 
@@ -306,8 +360,8 @@ def linearize_targets(
     # Requested slots
     targets += "[req_slots] "
     for i in range(len(slot_mapping) // 2):
-        slot = slot_mapping[i]
-        if slot in state["requested_slots"]:
+        slot_name = slot_mapping[i]
+        if slot_name in state["requested_slots"]:
             targets += f"{i} "
 
     # Update
@@ -316,11 +370,23 @@ def linearize_targets(
     )
 
 
-def generate_description(
+def allows_dontcare_value(slot_dict: dict, service: str) -> bool:
+    slot_name = slot_dict["name"]
+    return all(
+        (
+            service in CATEGORICALS_WITH_DONTCARE_VALUE
+            and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service]
+            and "dontcare" not in slot_dict["possible_values"]
+        )
+    )
+
+
+def linearize_description(
     schema: List[dict],
     turn: dict,
     prefix_separators: DictConfig,
     lowercase: bool = False,
+    dontcare_handling: str = "qa_option",
 ) -> dict:
     services = list(sorted([frame["service"] for frame in turn["frames"]]))
     ordered_services = [s["service_name"] for s in schema]
@@ -350,17 +416,16 @@ def generate_description(
 
                 if slot["is_categorical"]:
                     # append dontcare to descriptions of categorical slots if this value is possible
-                    if (
-                        service_name in CATEGORICALS_WITH_DONTCARE_VALUE
-                        and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service_name]
-                        and "dontcare" not in slot["possible_values"]
+                    cat_values_mapping[slot_name] = {}  # value to index
+                    random.shuffle(slot["possible_values"])
+                    if dontcare_handling == "qa_option" and allows_dontcare_value(
+                        slot, service_name
                     ):
                         slot["possible_values"].append("dontcare")
+                        random.shuffle(slot["possible_values"])
                     assert len(slot["possible_values"]) == len(
                         set(slot["possible_values"])
                     )
-                    random.shuffle(slot["possible_values"])
-                    cat_values_mapping[slot_name] = {}  # value to index
                     for index_letter, value in zip(
                         list(string.ascii_lowercase), slot["possible_values"]
                     ):
@@ -421,7 +486,7 @@ def process_file(
             if turn["speaker"] == "SYSTEM":
                 system_utterance = turn["utterance"]
             elif turn["speaker"] == "USER":
-                turn_info = generate_description(
+                turn_info = linearize_description(
                     schema,
                     turn,
                     config.prefix_separators,
