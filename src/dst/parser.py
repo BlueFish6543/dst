@@ -10,7 +10,7 @@ from typing import Optional
 
 from omegaconf import DictConfig, OmegaConf
 
-from dst.parser_metadata import (
+from dst.metadata.parser import (
     CATEGORICAL_SPECIAL_VALUES,
     UNAMBIGUOUS_TARGET_SEPARATORS,
     lower_to_schema_case,
