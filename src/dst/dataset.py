@@ -6,16 +6,18 @@ import logging
 import random
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from omegaconf import DictConfig
+from torch.utils.data import DataLoader, SequentialSampler
 from tqdm import tqdm
 
-from src.dst.utils import (
+from dst.utils import (
     Schema,
     infer_schema_variant_from_path,
     infer_split_name_from_path,
+    load_schema,
 )
 
 logger = logging.getLogger(__name__)
@@ -379,13 +381,15 @@ class BatchedTestDataset(DSTDataset):
         tokenizer,
         data_paths: list[str],
         data_size: int,
-        train_schema: Schema,
+        train_schema: Optional[Schema] = None,
     ):
         self.to_decode: set[str] = set(args.decode_only)
         self.encoder_over_length = 0
         tokenizer.padding_side = "left"
         tokenizer.pad_token = tokenizer.eos_token
         self.batch_size = args.batch_size
+        if train_schema is None:
+            train_schema = load_schema(args.orig_train_schema_path)
         # TODO: VERY BAD DESIGN, NEEDS REFACTORING
         super().__init__(args, tokenizer, data_paths, data_size, train_schema)
 
@@ -482,3 +486,10 @@ if __name__ == "__main__":
 
 
 # TODO: self.examples has to be a text as would be fed to the current model (aka "input_ids")
+def get_inference_data_loader(args, tokenizer):
+    dataset = BatchedTestDataset(args, tokenizer, args.dst_test_path, args.data_size)
+    sampler = SequentialSampler(dataset)
+    data_loader = DataLoader(
+        dataset, sampler=sampler, batch_size=None, collate_fn=dataset.collate_fn
+    )
+    return data_loader
