@@ -1,7 +1,13 @@
+import pathlib
 from collections import defaultdict
+from pathlib import Path
+from typing import Optional
 
 import torch
+from omegaconf import DictConfig
 from tqdm import tqdm
+
+from dst.utils import infer_data_version_from_path, infer_schema_variant_from_path
 
 
 def remove_padding(output_strings: list[str], pad_token: str) -> list(str):
@@ -70,3 +76,42 @@ def run_inference(args, tokenizer, model, data_loader, device):
                 collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
                 collector[dialogue_id][turn_idx][service]["predicted_str"] = bs_pred_str
     return dict(collector)
+
+
+def setup_inference_config(
+    args: DictConfig, hyp_dir: Optional[pathlib.Path] = None, override: bool = False
+):
+    """Helper function to setup configuration for running inference during training."""
+
+    inference_config = args.decode
+    experiment = args.train.experiment_name
+    inference_config.dst_test_path = [str(args.dev.dst_dev_path)]
+    inference_config.orig_train_schema_path = str(args.train.orig_train_schema_path)
+    inference_config.override = override
+    schema_variant_identifier = infer_schema_variant_from_path(
+        str(args.dev.dst_dev_path)
+    )
+    data_version = infer_data_version_from_path(str(args.dev.dst_dev_path))
+    assert int(data_version.split("_")[1]) == args.data.version
+    try:
+        hyp_path = hyp_dir.joinpath(
+            experiment,
+            schema_variant_identifier,
+            "dev",
+            data_version,
+        )
+    # Retrieve path from args
+    except AttributeError:
+        if not inference_config.hyp_dir:
+            raise ValueError(
+                "You must provide a path for hypothesis to be saved via args.decode.hyp_path or -hyp/--hyp-path."
+            )
+        hyp_path = Path(inference_config.hyp_dir).joinpath(
+            experiment,
+            schema_variant_identifier,
+            "dev",
+            data_version,
+        )
+    if not hyp_path.exists():
+        hyp_path.mkdir(exist_ok=True, parents=True)
+    return inference_config
