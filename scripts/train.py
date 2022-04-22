@@ -5,6 +5,7 @@ import pathlib
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import click
 import torch
@@ -26,7 +27,8 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from src.dst.dataset import TrainDataset, Vocabulary
+from dst.inference import setup_inference_config
+from src.dst.dataset import TrainDataset, Vocabulary, get_inference_data_loader
 from src.dst.utils import (
     Schema,
     get_data_version,
@@ -137,7 +139,7 @@ def compute_dev_lm_loss(args, dataloader, model) -> dict[str, float]:
     }
 
 
-def train(
+def optimize_model(
     args,
     tokenizer,
     model,
@@ -146,6 +148,8 @@ def train(
     optimizer,
     scheduler,
     initial_step: int = 0,
+    inference_config: Optional[DictConfig] = None,
+    inference_data_loader: Optional[torch.utils.data.DataLoader] = None,
 ):
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
@@ -336,6 +340,27 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     type=click.Path(exists=True, path_type=Path),
     help="Path to the checkpoint folder from where the model is to be loaded.",
 )
+# inference arguments
+@click.option(
+    "--run_inference",
+    is_flag=True,
+    default=False,
+    help="Evaluate task-oriented performance on dev set.",
+)
+@click.option(
+    "--override",
+    is_flag=True,
+    default=False,
+    help="Override previous predictions found at destination.",
+)
+@click.option(
+    "-hyp",
+    "--hyp-dir",
+    "hyp_dir",
+    type=click.Path(path_type=Path),
+    help="Dir where hypothesis files are to be saved. "
+    "Auto-suffixed with args.decode.experiment_name model checkpoint binary name.",
+)
 def main(
     args_path: pathlib.Path,
     train_path: tuple[pathlib.Path],
@@ -343,6 +368,9 @@ def main(
     log_level: int,
     ckpt_path: pathlib.Path,
     orig_train_schema_path: pathlib.Path,
+    run_inference: bool,
+    override: bool,
+    hyp_dir: pathlib.Path,
 ):
     args = OmegaConf.load(args_path)
     set_seed(args.reproduce)
@@ -362,6 +390,7 @@ def main(
     args.train.special_tokens = list(set(special_tokens))
     args.train.dst_train_path = [str(p) for p in train_path]  # type: list[str]
     args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
+    args.train.orig_train_schema_path = orig_train_schema_path
 
     log_dir = (
         Path(args.train.checkpoint_dir)
@@ -470,7 +499,14 @@ def main(
             )
     if ckpt_path is not None:
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
-    train(
+    inference_config, inference_data_loader = None, None
+
+    if run_inference:
+        inference_config = setup_inference_config(args, hyp_dir, override)
+        logger.info("Inference config...")
+        logger.info(OmegaConf.to_yaml(inference_config))
+        inference_data_loader = get_inference_data_loader(inference_config, tokenizer)
+    optimize_model(
         args,
         tokenizer,
         model,
@@ -479,7 +515,10 @@ def main(
         optimizer,
         scheduler,
         initial_step=initial_step,
+        inference_config=inference_config,
+        inference_data_loader=inference_data_loader,
     )
+    # TODO: SAVE MODEL CONFIG AS PER batch_decode script
 
 
 if __name__ == "__main__":
