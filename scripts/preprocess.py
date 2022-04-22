@@ -206,7 +206,7 @@ def linearize_targets(
                 if current_slot_value == "dontcare":
                     if dontcare_handling == "predict_dontcare":
                         assert "dontcare" not in value_mapping.values()
-                        targets += f"{i}{slot_index_separator}dontcare"
+                        targets += f"{i}{slot_index_separator}dontcare "
                         continue
                 targets += (
                     f"{i}{slot_index_separator}{value_mapping[current_slot_value]} "
@@ -240,8 +240,8 @@ def allows_dontcare_value(slot_dict: dict, service: str) -> bool:
     return all(
         (
             service in CATEGORICALS_WITH_DONTCARE_VALUE
-            and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service]
-            and "dontcare" not in slot_dict["possible_values"]
+            and slot_name in CATEGORICALS_WITH_DONTCARE_VALUE[service],
+            "dontcare" not in slot_dict["possible_values"],
         )
     )
 
@@ -356,6 +356,7 @@ def process_file(
                     turn,
                     config.prefix_separators,
                     lowercase=lowercase_model_inputs,
+                    dontcare_handling=config.dontcare_handling,
                 )
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
@@ -369,6 +370,7 @@ def process_file(
                         config.value_selection,
                         lowercase=config.lowercase_model_targets,
                         slot_index_separator=target_slot_index_separator,
+                        dontcare_handling=config.dontcare_handling,
                     )
                 result[dialogue_id].append(
                     {
