@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import sys
@@ -13,7 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import RandomSampler, SequentialSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import (
@@ -27,10 +28,17 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from dst.inference import setup_inference_config
-from src.dst.dataset import TrainDataset, Vocabulary, get_inference_data_loader
-from src.dst.utils import (
-    Schema,
+from dst.dataset import (
+    BatchedTestDataset,
+    Vocabulary,
+    get_dataloader,
+    get_inference_data_loader,
+)
+from dst.evaluation import get_metrics, log_metrics_to_tb, save_metrics
+from dst.inference import run_inference, setup_inference_config
+from dst.parser import parse, setup_parser
+from dst.scoring_utils import setup_evaluator_inputs
+from dst.utils import (
     get_data_version,
     load_model,
     load_optimizer_scheduler,
@@ -56,24 +64,6 @@ except ModuleNotFoundError:
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
-
-
-def get_dataloader(
-    args: DictConfig,
-    tokenizer,
-    data_paths: list[str],
-    schema: Schema,
-    sampler,
-    data_size: int = -1,
-) -> DataLoader:
-    dataset = TrainDataset(args, tokenizer, data_paths, data_size, schema)
-    dataloader = DataLoader(
-        dataset,
-        sampler=sampler(dataset),
-        batch_size=args.batch_size,
-        collate_fn=dataset.collate_fn,
-    )
-    return dataloader
 
 
 def compute_dev_lm_loss(args, dataloader, model) -> dict[str, float]:
@@ -139,6 +129,80 @@ def compute_dev_lm_loss(args, dataloader, model) -> dict[str, float]:
     }
 
 
+def compute_task_oriented_metrics(
+    global_step: int,
+    model: T5ForConditionalGeneration,
+    tokenizer: T5Tokenizer,
+    inference_config: DictConfig,
+    inference_data_loader: BatchedTestDataset,
+) -> dict:
+    """Compute the SGD metrics for the current model."""
+    this_ckpt_hyp_path = Path(inference_config.hyp_path).joinpath(
+        f"model.{str(global_step)}"
+    )
+    belief_states = {}
+    if this_ckpt_hyp_path.exists():
+        if not inference_config.override:
+            logger.warning(
+                f"Cannot override predictions for {this_ckpt_hyp_path}, skipping decoding. "
+                f"Use --override flag to achieve this behaviour."
+            )
+            belief_states = None
+        else:
+            logger.warning(f"Overriding predictions for {this_ckpt_hyp_path}")
+    else:
+        this_ckpt_hyp_path.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        f"Decoding model after {global_step} seen examples. "
+        f"Saving dialogues and belief states to {this_ckpt_hyp_path}"
+    )
+    if belief_states is not None:
+        belief_states = run_inference(
+            inference_config, tokenizer, model, inference_data_loader, DEVICE
+        )
+        with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
+            json.dump(belief_states, f)
+        assert isinstance(inference_config.dst_test_path, list)
+        parser_inputs = setup_parser(
+            inference_config.ref_schema_path,
+            inference_config.dst_test_path[0],
+            inference_config.template_dir,
+            str(this_ckpt_hyp_path),
+        )
+        parse(
+            parser_inputs["schema"],
+            belief_states,
+            parser_inputs["preprocessed_references"],
+            this_ckpt_hyp_path,
+            inference_config,
+            value_separator=inference_config.preprocessing.value_selection.value_separator,
+            recase_categorical_values=inference_config.preprocessing.lowercase_model_targets,
+            target_slot_index_separator=inference_config.preprocessing.target_slot_index_separator,
+            files_to_parse=inference_data_loader.dialogue_files,
+        )
+        evaluator_inputs = setup_evaluator_inputs(this_ckpt_hyp_path, inference_config)
+        all_metrics_aggregate, _ = get_metrics(
+            evaluator_inputs["dataset_ref"],
+            evaluator_inputs["dataset_hyp"],
+            evaluator_inputs["eval_services"],
+            evaluator_inputs["in_domain_services"],
+        )
+        logger.info(f"Dialogue metrics {str(all_metrics_aggregate['#ALL_SERVICES'])}")
+        logger.info(f"Dialogue metrics {str(all_metrics_aggregate['#SEEN_SERVICES'])}")
+        logger.info(
+            f"Dialogue metrics {str(all_metrics_aggregate['#UNSEEN_SERVICES'])}"
+        )
+        save_metrics(
+            global_step,
+            Path(inference_config.metrics_dir),
+            this_ckpt_hyp_path,
+            evaluator_inputs,
+            all_metrics_aggregate,
+        )
+        return all_metrics_aggregate
+    return {}
+
+
 def optimize_model(
     args,
     tokenizer,
@@ -149,8 +213,26 @@ def optimize_model(
     scheduler,
     initial_step: int = 0,
     inference_config: Optional[DictConfig] = None,
-    inference_data_loader: Optional[torch.utils.data.DataLoader] = None,
+    inference_data_loader: Optional[BatchedTestDataset] = None,
 ):
+    def _log_lr(scheduler: torch.optim.lr_scheduler.LambdaLR):
+
+        nonlocal writer
+        log_lr = False
+        if scheduler is not None:
+            if n_batches * train_args.batch_size > LR_LOG_FREQ_CHANGE_LIMIT:
+                if n_batches % LR_LOG_FREQ_BATCHES == 0:
+                    log_lr = True
+            else:
+                if n_batches % train_args.lr_log_freq == 0:
+                    log_lr = True
+            if log_lr:
+                lrs = scheduler.get_last_lr()
+                assert len(lrs) == 1
+                writer.add_scalar(
+                    "lr", lrs[0], global_step=n_batches * train_args.batch_size
+                )
+
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
     log_dir = (
@@ -163,14 +245,14 @@ def optimize_model(
     )
     logger.info(f"Tensorboard logs saved at: {log_dir}")
     eval_step = dev_args.eval_interval // train_args.batch_size
-    global_step = initial_step // train_args.batch_size
+    n_batches = initial_step // train_args.batch_size
     dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
     for subset, value in dev_losses.items():
-        logger.info(f"Epoch: {global_step} | {subset} loss: {value:.8f}")
-        if global_step > 0:
+        logger.info(f"Batches {n_batches} | {subset} loss: {value:.8f}")
+        if n_batches > 0:
             # We can't actually read the plot if we log that value
             writer.add_scalar(
-                f"Loss/{subset}", value, global_step=global_step * train_args.batch_size
+                f"Loss/{subset}", value, global_step=n_batches * train_args.batch_size
             )
     logger.info("Start training!")
     for epoch in range(train_args.epochs):
@@ -196,79 +278,77 @@ def optimize_model(
             )
             loss = output.loss.mean()
             loss_disp += output.loss.mean().item()
-            global_step += 1
+            n_batches += 1
             # Update model
             if loss.item() != 0:
                 loss = loss / train_args.gradient_accumulation_steps
                 loss.backward()
-            if global_step % train_args.gradient_accumulation_steps == 0:
+            if n_batches % train_args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 if train_args.use_scheduler:
                     scheduler.step()
                 optimizer.zero_grad()
-            log_lr = False
-            if scheduler is not None:
-                if global_step * train_args.batch_size > LR_LOG_FREQ_CHANGE_LIMIT:
-                    if global_step % LR_LOG_FREQ_BATCHES == 0:
-                        log_lr = True
-                else:
-                    if global_step % train_args.lr_log_freq == 0:
-                        log_lr = True
-                if log_lr:
-                    lrs = scheduler.get_last_lr()
-                    assert len(lrs) == 1
-                    writer.add_scalar(
-                        "lr", lrs[0], global_step=global_step * train_args.batch_size
-                    )
-            if global_step % eval_step == 0:
+            _log_lr(scheduler)
+
+            if n_batches % eval_step == 0:
+                task_oriented_metrics = compute_task_oriented_metrics(
+                    n_batches * train_args.batch_size,
+                    model,
+                    tokenizer,
+                    inference_config,
+                    inference_data_loader,
+                )
+                log_metrics_to_tb(
+                    n_batches * train_args.batch_size, writer, task_oriented_metrics
+                )
                 dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
                 for subset, value in dev_losses.items():
                     logger.info(
                         f"Epoch: {epoch} | "
-                        f"Batch: {global_step} | "
+                        f"Batch: {n_batches} | "
                         f"{subset} loss: {value:.8f}"
                     )
                     writer.add_scalar(
                         f"Loss/{subset}",
                         value,
-                        global_step=global_step * train_args.batch_size,
+                        global_step=n_batches * train_args.batch_size,
                     )
                 save_checkpoint(
                     train_dev_args,
                     tokenizer,
                     model,
-                    global_step * train_args.batch_size,
+                    n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
-                    global_step,
+                    n_batches,
                 )
                 model.train()
-            if global_step in train_args.global_step_checkpoints:
+            if n_batches in train_args.global_step_checkpoints:
                 save_checkpoint(
                     train_dev_args,
                     tokenizer,
                     model,
-                    global_step * train_args.batch_size,
+                    n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
-                    global_step,
+                    n_batches,
                 )
         loss_disp /= local_step + 1
         logger.info(
-            f"Epoch: {epoch} | Batch: {global_step} | "
+            f"Epoch: {epoch} | Batch: {n_batches} | "
             f"Train loss: {loss_disp:.8f} | "
             f"Time: {time.time() - start_time:.3f}"
         )
         writer.add_scalar(
-            "Loss/train", loss_disp, global_step=global_step * train_args.batch_size
+            "Loss/train", loss_disp, global_step=n_batches * train_args.batch_size
         )
         dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
         for subset, value in dev_losses.items():
             logger.info(
-                f"Epoch: {epoch} | Batch: {global_step} | {subset} loss: {value:.8f}"
+                f"Epoch: {epoch} | Batch: {n_batches} | {subset} loss: {value:.8f}"
             )
             writer.add_scalar(
-                f"Loss/{subset}", value, global_step=global_step * train_args.batch_size
+                f"Loss/{subset}", value, global_step=n_batches * train_args.batch_size
             )
 
 
@@ -341,7 +421,7 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     help="Path to the checkpoint folder from where the model is to be loaded.",
 )
 @click.option(
-    "--run_inference",
+    "--do_inference",
     is_flag=True,
     default=False,
     help="Evaluate task-oriented performance on dev set.",
@@ -363,8 +443,8 @@ def set_model(args: DictConfig, data_parallel: bool = False):
 )
 @click.option(
     "-templates",
-    "--dialogue_templates",
-    "dialogue_templates",
+    "--template_dir",
+    "template_dir",
     type=click.Path(exists=True, path_type=Path),
     help="Absolute to the directory containing blank dialogue files for the dev set.",
 )
@@ -373,7 +453,7 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     "-ref",
     "--ref-dir",
     "ref_dir",
-    type=click.Path(path_type=Path),
+    type=click.Path(exists=True, path_type=Path),
     help="Dir where the references files for task-oriented eval are saved."
     "Necessary to evaluate task-oriented performance during training.",
 )
@@ -384,11 +464,11 @@ def main(
     log_level: int,
     ckpt_path: pathlib.Path,
     orig_train_schema_path: pathlib.Path,
-    run_inference: bool,
+    do_inference: bool,
     override: bool,
     hyp_dir: pathlib.Path,
     ref_dir: pathlib.Path,
-    dialogue_templates: pathlib.Path,
+    template_dir: pathlib.Path,
 ):
     args = OmegaConf.load(args_path)
     set_seed(args.reproduce)
@@ -398,7 +478,7 @@ def main(
     ), f"Attempting to train on multiple data versions {data_versions}"
     args.data.version = list(data_versions)[0]
     special_tokens = []
-    for p in train_path:
+    for p in train_path + dev_path:
         model_input_config = OmegaConf.load(
             f"{p.parent.joinpath('preprocessing_config.yaml')}"
         )
@@ -408,12 +488,18 @@ def main(
     args.train.special_tokens = list(set(special_tokens))
     args.train.dst_train_path = [str(p) for p in train_path]  # type: list[str]
     args.dev.dst_dev_path = [str(p) for p in dev_path]  # type: list[str]
+    if len(args.dev.dst_dev_path) > 1:
+        args.dev.dst_dev_path = [args.dev.dst_dev_path[0]]
+        logger.warning(
+            "Decoding multiple sets during inference is not supported. "
+            f"Only {args.dev.dst_dev_path[0]} will be decoded..."
+        )
     args.train.orig_train_schema_path = orig_train_schema_path
-    if run_inference:
+    if do_inference:
         assert ref_dir.joinpath("schema.json").exists()
-        args.decode.schema_path = str(ref_dir.joinpath("schema.json"))
         args.decode.ref_path = str(ref_dir)
-        args.decode.template_path = str(dialogue_templates)
+        args.decode.ref_schema_path = str(ref_dir.joinpath("schema.json"))
+        args.decode.template_dir = str(template_dir)
 
     log_dir = (
         Path(args.train.checkpoint_dir)
@@ -523,7 +609,7 @@ def main(
     if ckpt_path is not None:
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
     inference_config, inference_data_loader = None, None
-    if run_inference:
+    if do_inference:
         inference_config = setup_inference_config(args, hyp_dir, override)
         logger.info("Inference config...")
         logger.info(OmegaConf.to_yaml(inference_config))
@@ -540,7 +626,9 @@ def main(
         inference_config=inference_config,
         inference_data_loader=inference_data_loader,
     )
-    # TODO: SAVE MODEL CONFIG AS PER batch_decode script
+    # TODO: SAVE EXPERIMENT CONFIG AS PER DECODE SCRIPT SO PARSER WORKS AS WELL
+    # TODO: CHECKPOINT END OF EPOCH
+    # TODO: PROPER REPRODUCIBILITY ON DATA LOADERS
 
 
 if __name__ == "__main__":
