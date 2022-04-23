@@ -23,10 +23,16 @@ from transformers import (
     T5Tokenizer,
 )
 
+try:
+    import importlib_resources
+except (ImportError, ModuleNotFoundError):
+    pass
+
 logger = logging.getLogger(__name__)
 
 _EXPECTED_SCHEMA_VARIANTS = ["v1", "v2", "v3", "v4", "v5"]
 _EXPECTED_SPLITS = ["train", "test", "dev", "dev_small"]
+_DATA_PACKAGE = "data.raw"
 
 
 def set_seed(args):
@@ -375,3 +381,51 @@ def default_to_regular(d: defaultdict) -> dict:
     if isinstance(d, defaultdict):
         d = {k: default_to_regular(v) for k, v in d.items()}
     return d
+
+
+class PathMapping:
+
+    split_names = ["train", "dev", "test"]
+
+    def __init__(self, data_pckg_or_path: Union[str, pathlib.Path] = _DATA_PACKAGE):
+        self.pckg = data_pckg_or_path
+        try:
+            self.data_root = importlib_resources.files(data_pckg_or_path)
+        except (ModuleNotFoundError, NameError):
+            if isinstance(data_pckg_or_path, str):
+                self.data_root = pathlib.Path(data_pckg_or_path)
+        self._all_files = [r for r in self.data_root.iterdir()]
+        self.split_paths = self._split_paths()
+        self.schema_paths = self._schema_paths()
+
+    def _split_paths(self):
+        paths = {}
+        for split in PathMapping.split_names:
+            r = [f for f in self._all_files if f.name == split]
+            if not r:
+                continue
+            [paths[split]] = r
+        return paths
+
+    def _schema_paths(self):
+        return {
+            split: self.split_paths[split].joinpath("schema.json")
+            for split in PathMapping.split_names
+            if split in self.split_paths
+        }
+
+    def _get_split_path(self, split: Literal["train", "test", "dev"]) -> pathlib.Path:
+        return self.split_paths[split]
+
+    def _get_schema_path(self, split: Literal["train", "test", "dev"]) -> pathlib.Path:
+        return self.schema_paths[split]
+
+    def __getitem__(self, item):
+        if item in PathMapping.split_names:
+            return self.split_paths[item]
+        else:
+            if item != "schema":
+                raise ValueError(
+                    f"Keys available are schema and {*PathMapping.split_names,}"
+                )
+            return self.schema_paths
