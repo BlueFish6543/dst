@@ -49,8 +49,8 @@ logger = logging.getLogger(__name__)
 )
 @click.option(
     "-templates",
-    "--dialogue_templates",
-    "dialogue_templates",
+    "--template_dir",
+    "template_dir",
     required=True,
     type=click.Path(exists=True, path_type=Path),
     help="Absolute to the directory containing blank dialogue files for the split parsed.",
@@ -68,9 +68,10 @@ logger = logging.getLogger(__name__)
 @click.option(
     "-f",
     "--file",
-    "file_to_parse",
+    "files_to_parse",
     type=str,
     default=None,
+    multiple=True,
     help="Which file to parse. Possible file names are all files listed under dialogue templates,"
     "that is, the filenames are the same as the SGD train/dev/test dialogue files. For example,"
     "passing 'dialogues_001.json' will parse predictions for the dialogues in the corresponding files..",
@@ -82,7 +83,7 @@ def main(
     dialogue_templates: pathlib.Path,
     test_path: pathlib.Path,
     log_level: int,
-    file_to_parse: Optional[str],
+    files_to_parse: Optional[str],
 ):
 
     if output_dir is None:
@@ -131,7 +132,7 @@ def main(
         preprocessed_refs,
         output_dir,
         experiment_config,
-        file_to_parse=file_to_parse,
+        files_to_parse=list(files_to_parse),
     )
 
 
