@@ -1,7 +1,7 @@
 #!/bin/bash
 
-declare -a sgd_step=(1150000 1280000 1380000 1600000 1610000 1840000 1920000 2070000 2240000 230000 2300000 2530000 2560000 2760000 2880000 2990000 320000 3200000 3220000 3450000 3520000 3680000 3840000 3910000 4140000 4160000 4370000 460000 640000 690000 920000 960000) #(1380000 2070000 2530000 2990000 3680000 4140000 4600000 1150000 1610000 230000 2560000 3220000 3840000 4370000 690000 1280000 1840000 2300000 2760000 3450000 3910000 460000 920000) #(350000) #(700000 4900000 4550000 4550000 1400000 1050000)    #(1750000 2100000 2450000 2800000 3150000 3500000 3850000 4200000) #(1000000) #(1280000 1600000 40000 720000 1000000 1320000 1640000 400000 760000 1040000 1360000 1680000 440000 80000 1080000 1400000 1720000 480000 800000 1120000 1440000 200000 520000 840000 1160000 1480000 240000 560000 880000 120000 1520000 280000 600000 920000 1200000 1560000 320000 640000 960000 1240000 160000 360000 680000) #(1080000 1200000 600000 720000 840000 960000 1000000 1120000 520000 640000 760000 880000 1040000 1160000 560000 680000 800000 920000)
-declare -a schema_variants=("original") #("v1" "v2" "v3" "v4" "v5") #("original" "v1" "v2" "v3" "v4" "v5")
+declare -a sgd_step=(1840000)
+declare -a schema_variants=("original" "v1" "v2" "v3" "v4" "v5")
 
 if [ -z ${EXPERIMENT+x} ]; then
   echo "Please pass the experiment name to the evaluation command by prepending EXPERIMENT=my_experiment_name variable."
@@ -31,7 +31,7 @@ for step in "${sgd_step[@]}"; do
     python -m scripts.parse \
       --belief_path "$HYPS_BASE_DIR"/"$EXPERIMENT"/"$variant"/"$SPLIT"/version_"$VERSION"/model."$step" \
       --schema_path /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/raw/"$variant"/"$SPLIT"/schema.json \
-      --dialogue_templates data/interim/blank_dialogue_templates/"$variant"/"$SPLIT" \
+      --template_dir data/interim/blank_dialogue_templates/"$variant"/"$SPLIT" \
       --test_data /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/"$variant"/"$SPLIT"/version_"$VERSION"/data.json -vvv
     mkdir -p "metrics/$EXPERIMENT/$variant/$SPLIT/version_$VERSION"
   done
