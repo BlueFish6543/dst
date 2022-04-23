@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 import torch
+import transformers
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, SequentialSampler
 from tqdm import tqdm
@@ -493,3 +494,21 @@ def get_inference_data_loader(args, tokenizer):
         dataset, sampler=sampler, batch_size=None, collate_fn=dataset.collate_fn
     )
     return data_loader
+
+
+def get_dataloader(
+    args: DictConfig,
+    tokenizer: transformers.T5Tokenizer,
+    data_paths: list[str],
+    schema: Schema,
+    sampler,
+    data_size: int = -1,
+) -> DataLoader:
+    dataset = TrainDataset(args, tokenizer, data_paths, data_size, schema)
+    dataloader = DataLoader(
+        dataset,
+        sampler=sampler(dataset),
+        batch_size=args.batch_size,
+        collate_fn=dataset.collate_fn,
+    )
+    return dataloader
