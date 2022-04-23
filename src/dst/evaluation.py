@@ -1,13 +1,17 @@
 import collections
+import json
+from pathlib import Path
 
 import numpy as np
 from absl import logging
+from torch.utils.tensorboard import SummaryWriter
 
 from dst import metrics
 
 ALL_SERVICES = "#ALL_SERVICES"
 SEEN_SERVICES = "#SEEN_SERVICES"
 UNSEEN_SERVICES = "#UNSEEN_SERVICES"
+PER_FRAME_OUTPUT_FILENAME = "metrics_and_dialogues.json"
 
 
 def get_metrics(
@@ -173,3 +177,35 @@ def get_metrics(
                 domain_metric_aggregate[metric_key] = metrics.NAN_VAL
         all_metric_aggregate[domain_key] = domain_metric_aggregate
     return all_metric_aggregate, per_frame_metric
+
+
+def save_metrics(
+    step: int,
+    metrics_dir: Path,
+    hyp_dir: Path,
+    evaluator_inputs: dict,
+    all_metrics_aggregate: dict,
+):
+
+    fpath = metrics_dir.joinpath(f"model_{step}_metrics.json")
+    with open(fpath, "w") as f:
+        json.dump(
+            all_metrics_aggregate, f, indent=2, separators=(",", ": "), sort_keys=True
+        )
+    with open(hyp_dir.joinpath(PER_FRAME_OUTPUT_FILENAME), "w") as f:
+        json.dump(evaluator_inputs["dataset_hyp"], f, indent=2, separators=(",", ": "))
+
+
+def log_metrics_to_tb(
+    global_step: int, writer: SummaryWriter, all_metrics_aggregate: dict
+):
+
+    if not all_metrics_aggregate:
+        return
+    service_categories = [ALL_SERVICES, UNSEEN_SERVICES, SEEN_SERVICES]
+    for service_type in service_categories:
+        this_service_type_metrics = all_metrics_aggregate[service_type]
+        for metric_name, value in this_service_type_metrics.items():
+            writer.add_scalar(
+                f"{service_type}/{metric_name}", value, global_step=global_step
+            )
