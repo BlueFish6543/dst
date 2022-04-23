@@ -290,7 +290,6 @@ class TrainDataset(DSTDataset):
     ):
         input_ids = context_ids
         label_ids = target_ids
-
         if len(input_ids) > self.max_seq_len:
             # Handle over-length example
             logger.warning(
