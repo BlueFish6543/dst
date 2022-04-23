@@ -6,6 +6,7 @@ import logging
 import pathlib
 import re
 from collections import Counter
+from distutils.dir_util import copy_tree
 from typing import Optional
 
 from omegaconf import DictConfig, OmegaConf
@@ -16,6 +17,7 @@ from dst.metadata.parser import (
     lower_to_schema_case,
     time_slots,
 )
+from dst.utils import Schema
 
 logger = logging.getLogger(__name__)
 
@@ -890,7 +892,6 @@ def populate_dialogue_state(
     predicted_data: dict,
     template_dialogue: dict,
     schema: dict,
-    model_name: str,
     preprocessed_references: dict,
     value_separator: Optional[str] = None,
     restore_categorical_case: bool = False,
@@ -924,18 +925,6 @@ def populate_dialogue_state(
             predicted_str = predicted_data[turn_index][service_name]["predicted_str"]
 
             # Some checks
-            if "gpt2" in model_name.lower():
-                try:
-                    # Should contain the dialogue history
-                    # We call replace() to avoid issues with extra whitespace
-                    assert template_turn["utterance"].replace(
-                        " ", ""
-                    ) in predicted_str.replace(" ", "")
-                except AssertionError:
-                    logger.warning(
-                        f"{predicted_str} in {dialogue_id}_{turn_index} does not match user utterance. Skipping."
-                    )
-                    raise AssertionError
             if "<EOS>" not in predicted_str:
                 logger.warning(
                     f"No <EOS> token in {dialogue_id}_{turn_index}. Skipping."
@@ -943,15 +932,7 @@ def populate_dialogue_state(
                 continue
 
             # Extract string between <BOS> and <EOS>
-            if "gpt2" in model_name.lower():
-                predicted_str = (
-                    re.search(r"<BOS>(.*)<EOS>", predicted_str).group(1).strip()
-                )
-            elif "t5" in model_name.lower():
-                predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
-            else:
-                raise ValueError("Unsupported model.")
-
+            predicted_str = re.search(r"(.*)<EOS>", predicted_str).group(1).strip()
             state = parse_predicted_string(
                 service_name,
                 predicted_str,
@@ -979,7 +960,6 @@ def parse(
     target_slot_index_separator: Optional[str] = None,
     file_to_parse: Optional[str] = None,
 ):
-    model_name = experiment_config.decode.model_name_or_path
     try:
         data_processing_config = experiment_config.data.preprocessing
         train_data_paths = list(data_processing_config.keys())
@@ -1086,7 +1066,6 @@ def parse(
                     predicted_data,
                     blank_dialogue,
                     schema,
-                    model_name,
                     preprocessed_references[dialogue_id],
                     value_separator=value_separator,
                     restore_categorical_case=recase_categorical_values,
@@ -1094,3 +1073,28 @@ def parse(
                 )
             with open(output_dir.joinpath(file.name), "w") as f:
                 json.dump(dialogue_templates, f, indent=4)
+
+
+def setup_parser(
+    schema_path: str,
+    preprocessed_reference_dir: str,
+    templates_dir: str,
+    belief_states_path: str,
+) -> dict:
+    """Helper function that helps setup parsing so that it can be ran at training time."""
+
+    copy_tree(templates_dir, belief_states_path)
+    schema_path = pathlib.Path(schema_path)
+    preprocessed_reference_dir = pathlib.Path(preprocessed_reference_dir)
+    assert preprocessed_reference_dir.name == "data.json"
+    assert schema_path.name == "schema.json"
+    with open(preprocessed_reference_dir, "r") as f:
+        preprocessed_references = json.load(f)
+    with open(schema_path, "r") as f:
+        schema = json.load(f)
+    logger.info(f"Parsing {belief_states_path} directory.")
+    return {
+        "schema": schema,
+        "schema_obj": Schema(schema_path),
+        "preprocessed_references": preprocessed_references,
+    }
