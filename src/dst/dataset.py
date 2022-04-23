@@ -121,6 +121,33 @@ class Vocabulary:
             self.vocabulary_update = True
 
 
+def get_inference_data_loader(args, tokenizer):
+    dataset = BatchedTestDataset(args, tokenizer, args.dst_test_path, args.data_size)
+    sampler = SequentialSampler(dataset)
+    data_loader = DataLoader(
+        dataset, sampler=sampler, batch_size=None, collate_fn=dataset.collate_fn
+    )
+    return data_loader
+
+
+def get_dataloader(
+    args: DictConfig,
+    tokenizer: transformers.T5Tokenizer,
+    data_paths: list[str],
+    schema: Schema,
+    sampler,
+    data_size: int = -1,
+) -> DataLoader:
+    dataset = TrainDataset(args, tokenizer, data_paths, data_size, schema)
+    dataloader = DataLoader(
+        dataset,
+        sampler=sampler(dataset),
+        batch_size=args.batch_size,
+        collate_fn=dataset.collate_fn,
+    )
+    return dataloader
+
+
 def pad(sentences, pad_id, side="right"):
     max_len = max((map(len, sentences)))
     attention_mask = []
@@ -565,30 +592,3 @@ class BatchedTestDataset(DSTDataset):
 
 if __name__ == "__main__":
     pass
-
-
-def get_inference_data_loader(args, tokenizer):
-    dataset = BatchedTestDataset(args, tokenizer, args.dst_test_path, args.data_size)
-    sampler = SequentialSampler(dataset)
-    data_loader = DataLoader(
-        dataset, sampler=sampler, batch_size=None, collate_fn=dataset.collate_fn
-    )
-    return data_loader
-
-
-def get_dataloader(
-    args: DictConfig,
-    tokenizer: transformers.T5Tokenizer,
-    data_paths: list[str],
-    schema: Schema,
-    sampler,
-    data_size: int = -1,
-) -> DataLoader:
-    dataset = TrainDataset(args, tokenizer, data_paths, data_size, schema)
-    dataloader = DataLoader(
-        dataset,
-        sampler=sampler(dataset),
-        batch_size=args.batch_size,
-        collate_fn=dataset.collate_fn,
-    )
-    return dataloader
