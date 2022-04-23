@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from collections import defaultdict
 from pathlib import Path
@@ -7,7 +8,13 @@ import torch
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from dst.utils import infer_data_version_from_path, infer_schema_variant_from_path
+from dst.utils import (
+    infer_data_version_from_path,
+    infer_schema_variant_from_path,
+    infer_split_name_from_path,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def remove_padding(output_strings: list[str], pad_token: str) -> list(str):
@@ -82,10 +89,12 @@ def setup_inference_config(
     args: DictConfig, hyp_dir: Optional[pathlib.Path] = None, override: bool = False
 ):
     """Helper function to setup configuration for running inference during training."""
-
+    split = infer_split_name_from_path(args.dev.dst_dev_path)
     inference_config = args.decode
-    experiment = args.train.experiment_name
-    inference_config.dst_test_path = [str(args.dev.dst_dev_path)]
+    assert isinstance(args.dev.dst_dev_path, list) and len(args.dev.dst_dev_path) == 1
+    # to call parser with the correct data configuration
+    inference_config.preprocessing = args.data.preprocessing[args.dev.dst_dev_path[0]]
+    inference_config.dst_test_path = args.dev.dst_dev_path
     inference_config.orig_train_schema_path = str(args.train.orig_train_schema_path)
     inference_config.override = override
     schema_variant_identifier = infer_schema_variant_from_path(
@@ -95,9 +104,9 @@ def setup_inference_config(
     assert int(data_version.split("_")[1]) == args.data.version
     try:
         hyp_path = hyp_dir.joinpath(
-            experiment,
+            args.train.experiment_name,
             schema_variant_identifier,
-            "dev",
+            split,
             data_version,
         )
     # Retrieve path from args
@@ -107,11 +116,21 @@ def setup_inference_config(
                 "You must provide a path for hypothesis to be saved via args.decode.hyp_path or -hyp/--hyp-path."
             )
         hyp_path = Path(inference_config.hyp_dir).joinpath(
-            experiment,
+            args.train.experiment_name,
             schema_variant_identifier,
-            "dev",
+            split,
             data_version,
         )
     if not hyp_path.exists():
         hyp_path.mkdir(exist_ok=True, parents=True)
+    inference_config.hyp_dir = str(hyp_path)
+    metrics_dir = Path(inference_config.metrics_dir).joinpath(
+        args.train.experiment_name,
+        schema_variant_identifier,
+        split,
+        data_version,
+    )
+    if not metrics_dir.exists():
+        metrics_dir.mkdir(exist_ok=True, parents=True)
+    inference_config.metrics_dir = str(metrics_dir)
     return inference_config
