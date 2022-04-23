@@ -3,10 +3,11 @@ from __future__ import annotations
 import collections
 import json
 import logging
+import pathlib
 import random
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import torch
 import transformers
@@ -15,6 +16,7 @@ from torch.utils.data import DataLoader, SequentialSampler
 from tqdm import tqdm
 
 from dst.utils import (
+    PathMapping,
     Schema,
     infer_schema_variant_from_path,
     infer_split_name_from_path,
@@ -30,6 +32,74 @@ SPECIAL_TOKENS = {
     "sep_token": "<SEP>",
     "additional_special_tokens": [],
 }
+
+
+def reconstruct_filename(dial_id: str) -> str:
+    """Reconstruct filename from dialogue ID."""
+
+    file_prefix = int(dial_id.split("_")[0])
+
+    if file_prefix in range(10):
+        str_file_prefix = f"00{file_prefix}"
+    elif file_prefix in range(10, 100):
+        str_file_prefix = f"0{file_prefix}"
+    else:
+        str_file_prefix = f"{file_prefix}"
+
+    return f"dialogues_{str_file_prefix}.json"
+
+
+def get_file_map(
+    dialogue_ids: list[str],
+    split: Literal["train", "test", "dev"],
+    data_pckg_or_path: str = "data.raw",
+) -> dict[pathlib.Path, list[str]]:
+    """Returns a map where the keys are file paths and values are lists
+    comprising dialogues from `dialogue_ids` that are in the same file.
+
+    dialogue_ids:
+        IDs of the dialogues whose paths are to be returned, formated as the schema 'dialogue_id' field.
+    split:
+        The name of the split whose paths are to be returned.
+    data_pckg_or_path:
+        The location of the python package where the data is located
+    """
+
+    file_map = collections.defaultdict(list)
+    path_map = PathMapping(data_pckg_or_path=data_pckg_or_path)
+    for d_id in dialogue_ids:
+        # ValueError occurs if dialogue IDs do not match SGD convention
+        try:
+            fpath = path_map[split].joinpath(reconstruct_filename(d_id))
+        except ValueError:
+            found_dialogue = False
+        else:
+            # for the original SGD data, one can reconstruct the filename
+            # from dial ID to load the dialogue
+            file_map[fpath].append(d_id)
+            continue
+        # in general, just iterate through the file to find a given
+        # dialogue
+        if not found_dialogue:
+            for fpath in path_map[split].iterdir():
+                if not fpath.name.startswith("dialogues"):
+                    continue
+                with open(fpath, "r") as f:
+                    dial_bunch = json.load(f)
+                for dial in dial_bunch:
+                    if dial["dialogue_id"] == d_id:
+                        found_dialogue = True
+                        break
+
+                if found_dialogue:
+                    break
+
+            if found_dialogue:
+                file_map[fpath].append(d_id)
+            else:
+                logging.warning(f"Could not find dialogue {d_id}...")
+
+    return file_map
 
 
 @dataclass
@@ -103,6 +173,8 @@ class DSTDataset(torch.utils.data.Dataset):
             )
         self.schema_variants = inferred_schema_variants
         self._create_examples()
+        self.dialogue_files = None
+        self.to_decode = set()
 
     def __len__(self):
         return len(self.examples)
@@ -112,6 +184,31 @@ class DSTDataset(torch.utils.data.Dataset):
 
     def _create_examples(self):
         raise NotImplementedError
+
+    def _get_dialogue_ids(self):
+        dialogue_ids = set()
+        for example in self.examples:
+            if isinstance(example, list):
+                dialogue_ids.update([e["dialogue_id"] for e in self.examples])
+            else:
+                assert isinstance(example, dict)
+                dialogue_ids.add(example["dialogue_id"])
+        return dialogue_ids
+
+    def _infer_dialogue_files(self):
+        if self.data_size == -1 and not self.to_decode:
+            return
+        try:
+            data_pckg_or_path = self.args.ref_path
+        except AttributeError:
+            return
+        dialogue_ids = self._get_dialogue_ids()
+        self.dialogue_files = [
+            p.name
+            for p in get_file_map(
+                list(dialogue_ids), self.split, data_pckg_or_path=data_pckg_or_path
+            )
+        ]
 
 
 class TrainDataset(DSTDataset):
@@ -177,8 +274,8 @@ class TrainDataset(DSTDataset):
         logger.info(
             f"Number of output over-length examples: {self.data_paths}: {self.decoder_over_length} examples"
         )
-        random.shuffle(self.examples)
         if self.data_size != -1:
+            random.shuffle(self.examples)
             self.examples = self.examples[: self.data_size]
 
     def create_ids(
@@ -191,27 +288,8 @@ class TrainDataset(DSTDataset):
         dialogue_id: str,
         turn_index: int,
     ):
-        target_len = len(target_ids)
-        if "gpt2" in self.args.model_name_or_path.lower():
-            # context <BOS> target <EOS>
-            input_ids = (
-                context_ids
-                + [self.tokenizer.bos_token_id]
-                + target_ids
-                + [self.tokenizer.eos_token_id]
-            )
-            pad_len = len(input_ids) - target_len - 1  # EOS token
-            label_ids = (
-                [self.ignore_token_id] * pad_len
-                + target_ids
-                + [self.tokenizer.eos_token_id]
-            )
-            assert len(input_ids) == len(label_ids)
-        elif "t5" in self.args.model_name_or_path.lower():
-            input_ids = context_ids
-            label_ids = target_ids
-        else:
-            raise ValueError("Unsupported model.")
+        input_ids = context_ids
+        label_ids = target_ids
 
         if len(input_ids) > self.max_seq_len:
             # Handle over-length example
@@ -239,6 +317,7 @@ class TrainDataset(DSTDataset):
                 "seen": seen_flag,
                 "user_utterance": user_utterance,  # useful for results analysis
                 "example_id": f"{schema_variant_identifier}_{dialogue_id}_{turn_index}",
+                "dialogue_id": dialogue_id,
             }
         )
 
@@ -352,6 +431,7 @@ class TestDataset(DSTDataset):
                 "user_utterance": user_utterance,
                 "service": service,
                 "seen": seen_flag,
+                "dialogue_id": dialogue_id,
             }
         )
 
@@ -393,6 +473,7 @@ class BatchedTestDataset(DSTDataset):
             train_schema = load_schema(args.orig_train_schema_path)
         # TODO: VERY BAD DESIGN, NEEDS REFACTORING
         super().__init__(args, tokenizer, data_paths, data_size, train_schema)
+        self._get_dialogue_ids()
 
     def _create_examples(self):
         assert (
@@ -446,6 +527,7 @@ class BatchedTestDataset(DSTDataset):
                     this_batch["user_utterance"].append(user_utterance)
                     this_batch["service"].append(service)
                     this_batch["seen"].append(seen_flag)
+                    this_batch["dialogue_id"].append(dialogue_id)
                     remaining_examples -= 1
                     if remaining_examples == 0:
                         self.examples.append(self.create_ids(this_batch))
@@ -486,7 +568,6 @@ if __name__ == "__main__":
     pass
 
 
-# TODO: self.examples has to be a text as would be fed to the current model (aka "input_ids")
 def get_inference_data_loader(args, tokenizer):
     dataset = BatchedTestDataset(args, tokenizer, args.dst_test_path, args.data_size)
     sampler = SequentialSampler(dataset)
