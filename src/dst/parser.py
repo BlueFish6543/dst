@@ -958,7 +958,7 @@ def parse(
     value_separator: Optional[str] = None,
     recase_categorical_values: Optional[bool] = None,
     target_slot_index_separator: Optional[str] = None,
-    file_to_parse: Optional[str] = None,
+    files_to_parse: Optional[list[str]] = None,
 ):
     try:
         data_processing_config = experiment_config.data.preprocessing
@@ -1046,7 +1046,7 @@ def parse(
     pattern = re.compile(r"dialogues_[0-9]+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
-            if file_to_parse is not None and file.name != file_to_parse:
+            if files_to_parse is not None and file.name not in files_to_parse:
                 continue
             logger.info(f"Parsing file {file}.")
             with open(file, "r") as f:
