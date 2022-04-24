@@ -202,7 +202,9 @@ def compute_task_oriented_metrics(
             evaluator_inputs,
             all_metrics_aggregate,
         )
+        torch.cuda.empty_cache()
         return all_metrics_aggregate
+
     return {}
 
 
@@ -240,8 +242,12 @@ def optimize_model(
 
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
-    max_patience = (dev_args.eval_interval // train_args.batch_size) / (
-        dev_args.patience // train_args.batch_size
+    max_patience = int(
+        (dev_args.patience // train_args.batch_size)
+        / (dev_args.eval_interval // train_args.batch_size)
+    )
+    logger.info(
+        f"Training will stop if dev JGA does not improve after {max_patience} inference evaluations"
     )
     # assume that for some reason we want to continue training
     # after max dev jga stopped it
@@ -319,7 +325,7 @@ def optimize_model(
                     inference_config.date = get_datetime()
                     OmegaConf.save(
                         args,
-                        f=inference_config.hyp_path.joinpath(
+                        f=Path(inference_config.hyp_dir).joinpath(
                             f"model.{n_batches * train_args.batch_size}",
                             "experiment_config.yaml",
                         ),
@@ -328,11 +334,18 @@ def optimize_model(
                         "joint_goal_accuracy"
                     ]
                     if dev_jga > max_dev_jga:
+                        logger.info(f"dev JGA improved from {max_dev_jga} to {dev_jga}")
                         max_dev_jga = dev_jga
                         patience = 0
                     else:
                         patience += 1
+                        logger.info(
+                            f"{max_patience-patience} tries left to improve dev JGA"
+                        )
                     if patience == max_patience:
+                        logger.info(
+                            f"Stopping training as dev JGA has not improved in {patience} tries"
+                        )
                         stop_training = True
                         break
                 dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
@@ -682,6 +695,9 @@ def main(
         logger.info("Inference config...")
         logger.info(OmegaConf.to_yaml(inference_config))
         inference_data_loader = get_inference_data_loader(inference_config, tokenizer)
+        if inference_data_loader.dataset.dialogue_ids is not None:
+            inference_config.decode_only = inference_data_loader.dataset.dialogue_ids
+
     logger.info(OmegaConf.to_yaml(args))
     optimize_model(
         args,
