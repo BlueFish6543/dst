@@ -40,6 +40,7 @@ from dst.parser import parse, setup_parser
 from dst.scoring_utils import setup_evaluator_inputs
 from dst.utils import (
     get_data_version,
+    get_datetime,
     load_model,
     load_optimizer_scheduler,
     load_schema,
@@ -298,6 +299,15 @@ def optimize_model(
                     inference_config,
                     inference_data_loader,
                 )
+                if task_oriented_metrics:
+                    inference_config.date = get_datetime()
+                    OmegaConf.save(
+                        args,
+                        f=inference_config.hyp_path.joinpath(
+                            f"model.{n_batches * train_args.batch_size}",
+                            "experiment_config.yaml",
+                        ),
+                    )
                 log_metrics_to_tb(
                     n_batches * train_args.batch_size, writer, task_oriented_metrics
                 )
