@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
+import numpy as np
 import torch
 import transformers
 from omegaconf import DictConfig
@@ -32,6 +33,9 @@ SPECIAL_TOKENS = {
     "sep_token": "<SEP>",
     "additional_special_tokens": [],
 }
+
+g = torch.Generator()
+g.manual_seed(0)
 
 
 def reconstruct_filename(dial_id: str) -> str:
@@ -130,6 +134,12 @@ def get_inference_data_loader(args, tokenizer):
     return data_loader
 
 
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
 def get_dataloader(
     args: DictConfig,
     tokenizer: transformers.T5Tokenizer,
@@ -144,6 +154,8 @@ def get_dataloader(
         sampler=sampler(dataset),
         batch_size=args.batch_size,
         collate_fn=dataset.collate_fn,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
     return dataloader
 
