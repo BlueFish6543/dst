@@ -16,12 +16,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
-from transformers import (
-    GPT2LMHeadModel,
-    GPT2Tokenizer,
-    T5ForConditionalGeneration,
-    T5Tokenizer,
-)
+from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 try:
     import importlib_resources
@@ -47,14 +42,16 @@ def set_seed(args):
     torch.backends.cudnn.benchmark = args.cudnn.benchmark
 
 
-def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler, global_step):
+def save_checkpoint(
+    args, tokenizer, model, step_or_identifier: Union[str, int], optimizer, scheduler
+):
     ckpt_path = Path(args.train.checkpoint_dir)
     ckpt_path = ckpt_path.joinpath(
         args.train.experiment_name, f"version_{args.data.version}"
     )
     if not ckpt_path.exists():
         ckpt_path.mkdir(exist_ok=True, parents=True)
-    save_path = f"{ckpt_path}/model.{step}"
+    save_path = f"{ckpt_path}/model.{step_or_identifier}"
     logger.info(f"Save model in {save_path}!")
     tokenizer.save_pretrained(save_path)
     model.save_pretrained(save_path)
@@ -62,7 +59,7 @@ def save_checkpoint(args, tokenizer, model, step, optimizer, scheduler, global_s
     state_dict = {"optimizer_state_dict": optimizer.state_dict()}
     if scheduler is not None:
         state_dict["scheduler_state_dict"] = scheduler.state_dict()
-        state_dict["scheduler_last_epoch"] = global_step
+        state_dict["scheduler_last_epoch"] = scheduler.last_epoch
     torch.save(state_dict, os.path.join(save_path, "checkpoint.pth"))
 
 
@@ -71,14 +68,8 @@ def load_model(
 ):
     ckpt_path = args.checkpoint
     logger.info(f"Load model, tokenizer from {ckpt_path}")
-    if "gpt2" in args.model_name_or_path.lower():
-        tokenizer = GPT2Tokenizer.from_pretrained(ckpt_path)
-        model = GPT2LMHeadModel.from_pretrained(ckpt_path)
-    elif "t5" in args.model_name_or_path.lower():
-        tokenizer = T5Tokenizer.from_pretrained(ckpt_path)
-        model = T5ForConditionalGeneration.from_pretrained(ckpt_path)
-    else:
-        raise ValueError("Unsupported model.")
+    tokenizer = T5Tokenizer.from_pretrained(ckpt_path)
+    model = T5ForConditionalGeneration.from_pretrained(ckpt_path)
     if data_parallel:
         model = nn.DataParallel(model)
     model.to(device)
