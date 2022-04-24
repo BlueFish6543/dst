@@ -213,6 +213,7 @@ class DSTDataset(torch.utils.data.Dataset):
         self.schema_variants = inferred_schema_variants
         self._create_examples()
         self.dialogue_files = None
+        self.dialogue_ids = None
         self.to_decode = set()
 
     def __len__(self):
@@ -242,6 +243,7 @@ class DSTDataset(torch.utils.data.Dataset):
         except AttributeError:
             return
         dialogue_ids = self._get_dialogue_ids()
+        self.dialogue_ids = list(dialogue_ids)
         self.dialogue_files = [
             p.name
             for p in get_file_map(
