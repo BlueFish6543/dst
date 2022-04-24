@@ -136,7 +136,8 @@ def compute_task_oriented_metrics(
     inference_data_loader: BatchedTestDataset,
 ) -> dict:
     """Compute the SGD metrics for the current model."""
-    this_ckpt_hyp_path = Path(inference_config.hyp_path).joinpath(
+
+    this_ckpt_hyp_path = Path(inference_config.hyp_dir).joinpath(
         f"model.{str(global_step)}"
     )
     belief_states = {}
@@ -156,12 +157,14 @@ def compute_task_oriented_metrics(
         f"Saving dialogues and belief states to {this_ckpt_hyp_path}"
     )
     if belief_states is not None:
+        logger.info(f"Computing task oriented metrics at global step {global_step}")
         belief_states = run_inference(
             inference_config, tokenizer, model, inference_data_loader, DEVICE
         )
         with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
             json.dump(belief_states, f)
         assert isinstance(inference_config.dst_test_path, list)
+        logger.info(f"Parsing model predictions at global step {global_step}")
         parser_inputs = setup_parser(
             inference_config.ref_schema_path,
             inference_config.dst_test_path[0],
@@ -179,6 +182,7 @@ def compute_task_oriented_metrics(
             target_slot_index_separator=inference_config.preprocessing.target_slot_index_separator,
             files_to_parse=inference_data_loader.dialogue_files,
         )
+        logger.info(f"Evaluating model predictions at global step {global_step}")
         evaluator_inputs = setup_evaluator_inputs(this_ckpt_hyp_path, inference_config)
         all_metrics_aggregate, _ = get_metrics(
             evaluator_inputs["dataset_ref"],
@@ -355,6 +359,7 @@ def optimize_model(
                     n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
+                    train_args.batch_size * n_batches,
                     dev_jga=dev_jga,
                     patience=patience,
                 )
@@ -367,6 +372,7 @@ def optimize_model(
                     n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
+                    train_args.batch_size * n_batches,
                     dev_jga=dev_jga,
                     patience=patience,
                 )
@@ -386,6 +392,7 @@ def optimize_model(
             n_batches * train_args.batch_size,
             optimizer,
             scheduler,
+            train_args.batch_size * n_batches,
             dev_jga=dev_jga,
             patience=patience,
         )
@@ -396,6 +403,7 @@ def optimize_model(
             "last",
             optimizer,
             scheduler,
+            train_args.batch_size * n_batches,
             dev_jga=dev_jga,
             patience=patience,
         )
@@ -504,7 +512,7 @@ def set_model(args: DictConfig, data_parallel: bool = False):
 # necessary for scoring
 @click.option(
     "-ref",
-    "--ref-dir",
+    "--ref_dir",
     "ref_dir",
     type=click.Path(exists=True, path_type=Path),
     help="Dir where the references files for task-oriented eval are saved."
@@ -547,7 +555,7 @@ def main(
             "Decoding multiple sets during inference is not supported. "
             f"Only {args.dev.dst_dev_path[0]} will be decoded..."
         )
-    args.train.orig_train_schema_path = orig_train_schema_path
+    args.train.orig_train_schema_path = str(orig_train_schema_path)
     if do_inference:
         assert ref_dir.joinpath("schema.json").exists()
         args.decode.ref_path = str(ref_dir)
@@ -579,9 +587,7 @@ def main(
     if ckpt_path:
         logger.info(f"Restarting training from checkpoint: {ckpt_path}")
 
-    logger.info(OmegaConf.to_yaml(args))
     logger.info("Training on: {}".format("GPU" if "cuda" in DEVICE.type else "CPU"))
-    initial_step = 0 if not ckpt_path else int(ckpt_path.suffix[1:])
     orig_train_schema = load_schema(orig_train_schema_path)
     if orig_train_schema is None:
         raise ValueError(
@@ -597,6 +603,7 @@ def main(
         config, tokenizer, model = set_model(
             args.train, data_parallel=args.train.data_parallel
         )
+
     if args.train.optimizer == "adamw":
         optimizer = AdamW(
             model.parameters(), lr=args.train.learning_rate, eps=args.train.adam_eps
@@ -636,6 +643,7 @@ def main(
     )
     scheduler = None
     metrics = {}
+    initial_step = 0
     if args.train.use_scheduler:
         if args.train.optimizer in ["adam", "adamw"]:
             t_total = (
@@ -664,7 +672,7 @@ def main(
         assert (
             ckpt_path.name == "model.last"
         ), "For reproducibility, load model saved at the end of the epoch"
-        optimizer, scheduler, metrics = load_optimizer_scheduler(
+        optimizer, scheduler, metrics, inital_step = load_optimizer_scheduler(
             ckpt_path, optimizer, scheduler
         )
 
@@ -674,6 +682,7 @@ def main(
         logger.info("Inference config...")
         logger.info(OmegaConf.to_yaml(inference_config))
         inference_data_loader = get_inference_data_loader(inference_config, tokenizer)
+    logger.info(OmegaConf.to_yaml(args))
     optimize_model(
         args,
         tokenizer,
