@@ -40,7 +40,7 @@ dev:
   decoder_max_seq_len: 512
   data_size: -1 # number of examples in an epoch (-1: all examples available); use for testing
   eval_interval: 160000  # number of examples after which the model is evaluated
-  patience: 480000 # if dev JGA does not improve in this many steps, stop training
+  patience: 480000 # if dev JGA does not improve in this many examples after max, stop training
   batch_size: 8
   verbose:
     disable_display: false
