@@ -20,8 +20,6 @@ from tqdm import tqdm
 from transformers import (
     Adafactor,
     AutoConfig,
-    GPT2LMHeadModel,
-    GPT2Tokenizer,
     T5ForConditionalGeneration,
     T5Tokenizer,
     get_constant_schedule_with_warmup,
@@ -215,6 +213,8 @@ def optimize_model(
     initial_step: int = 0,
     inference_config: Optional[DictConfig] = None,
     inference_data_loader: Optional[BatchedTestDataset] = None,
+    max_dev_jga: float = 0.0,
+    patience: int = 0,
 ):
     def _log_lr(scheduler: torch.optim.lr_scheduler.LambdaLR):
 
@@ -236,6 +236,9 @@ def optimize_model(
 
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
+    max_patience = (dev_args.eval_interval // train_args.batch_size) / (
+        dev_args.patience // train_args.batch_size
+    )
     log_dir = (
         Path()
         .resolve()
@@ -248,6 +251,7 @@ def optimize_model(
     eval_step = dev_args.eval_interval // train_args.batch_size
     n_batches = initial_step // train_args.batch_size
     dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
+    dev_jga = max_dev_jga
     for subset, value in dev_losses.items():
         logger.info(f"Batches {n_batches} | {subset} loss: {value:.8f}")
         if n_batches > 0:
@@ -256,6 +260,7 @@ def optimize_model(
                 f"Loss/{subset}", value, global_step=n_batches * train_args.batch_size
             )
     logger.info("Start training!")
+    stop_training = False
     for epoch in range(train_args.epochs):
         # Initialise for each epoch
         start_time = time.time()
@@ -299,6 +304,9 @@ def optimize_model(
                     inference_config,
                     inference_data_loader,
                 )
+                log_metrics_to_tb(
+                    n_batches * train_args.batch_size, writer, task_oriented_metrics
+                )
                 if task_oriented_metrics:
                     inference_config.date = get_datetime()
                     OmegaConf.save(
@@ -308,9 +316,17 @@ def optimize_model(
                             "experiment_config.yaml",
                         ),
                     )
-                log_metrics_to_tb(
-                    n_batches * train_args.batch_size, writer, task_oriented_metrics
-                )
+                    dev_jga = task_oriented_metrics["#ALL_SERVICES"][
+                        "joint_goal_accuracy"
+                    ]
+                    if dev_jga > max_dev_jga:
+                        max_dev_jga = dev_jga
+                        patience = 0
+                    else:
+                        patience += 1
+                    if patience == max_patience:
+                        stop_training = True
+                        break
                 dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
                 for subset, value in dev_losses.items():
                     logger.info(
@@ -323,6 +339,11 @@ def optimize_model(
                         value,
                         global_step=n_batches * train_args.batch_size,
                     )
+                dev_jga = (
+                    0.0
+                    if not task_oriented_metrics
+                    else task_oriented_metrics["#ALL_SERVICES"]["joint_goal_accuracy"]
+                )
                 save_checkpoint(
                     train_dev_args,
                     tokenizer,
@@ -330,6 +351,8 @@ def optimize_model(
                     n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
+                    dev_jga=dev_jga,
+                    patience=patience,
                 )
                 model.train()
             if n_batches in train_args.global_step_checkpoints:
@@ -340,6 +363,8 @@ def optimize_model(
                     n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
+                    dev_jga=dev_jga,
+                    patience=patience,
                 )
         loss_disp /= local_step + 1
         logger.info(
@@ -357,8 +382,19 @@ def optimize_model(
             n_batches * train_args.batch_size,
             optimizer,
             scheduler,
+            dev_jga=dev_jga,
+            patience=patience,
         )
-        save_checkpoint(train_dev_args, tokenizer, model, "last", optimizer, scheduler)
+        save_checkpoint(
+            train_dev_args,
+            tokenizer,
+            model,
+            "last",
+            optimizer,
+            scheduler,
+            dev_jga=dev_jga,
+            patience=patience,
+        )
         dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
         for subset, value in dev_losses.items():
             logger.info(
@@ -367,21 +403,17 @@ def optimize_model(
             writer.add_scalar(
                 f"Loss/{subset}", value, global_step=n_batches * train_args.batch_size
             )
+        if stop_training:
+            break
 
 
 def set_model(args: DictConfig, data_parallel: bool = False):
     # Initiate config, tokenizer and model
     config = AutoConfig.from_pretrained(args.model_name_or_path)
-    if "gpt2" in args.model_name_or_path.lower():
-        tokenizer = GPT2Tokenizer.from_pretrained(args.model_name_or_path)
-        model = GPT2LMHeadModel.from_pretrained(args.model_name_or_path, config=config)
-    elif "t5" in args.model_name_or_path.lower():
-        tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
-        model = T5ForConditionalGeneration.from_pretrained(
-            args.model_name_or_path, config=config
-        )
-    else:
-        raise ValueError("Unsupported model.")
+    tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
+    model = T5ForConditionalGeneration.from_pretrained(
+        args.model_name_or_path, config=config
+    )
     vocabulary = Vocabulary()
     vocabulary.add_special_tokens(args.special_tokens)
     tokenizer.add_special_tokens(vocabulary.special_tokens)
@@ -599,6 +631,7 @@ def main(
         data_size=args.dev.data_size,
     )
     scheduler = None
+    metrics = {}
     if args.train.use_scheduler:
         if args.train.optimizer in ["adam", "adamw"]:
             t_total = (
@@ -627,7 +660,9 @@ def main(
         assert (
             ckpt_path.name == "model.last"
         ), "For reproducibility, load model saved at the end of the epoch"
-        optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
+        optimizer, scheduler, metrics = load_optimizer_scheduler(
+            ckpt_path, optimizer, scheduler
+        )
 
     inference_config, inference_data_loader = None, None
     if do_inference:
@@ -646,8 +681,9 @@ def main(
         initial_step=initial_step,
         inference_config=inference_config,
         inference_data_loader=inference_data_loader,
+        max_dev_jga=metrics.get("dev_jga", 0.0),
+        patience=metrics.get("dev_jga_patience", 0),
     )
-    # TODO: SAVE EXPERIMENT CONFIG AS PER DECODE SCRIPT SO PARSER WORKS AS WELL
 
 
 if __name__ == "__main__":
