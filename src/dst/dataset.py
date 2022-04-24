@@ -585,7 +585,7 @@ class BatchedTestDataset(DSTDataset):
             batch["text_input"],
             return_tensors="pt",
             padding=True,
-            truncation=True,
+            truncation=False,
             max_length=self.max_seq_len,
         )
         batch["input_ids"] = model_inputs["input_ids"]
