@@ -47,7 +47,7 @@ from dst.utils import (
     set_seed,
 )
 
-LR_LOG_FREQ_CHANGE_LIMIT = 128000
+LR_LOG_FREQ_CHANGE_LIMIT = 32000
 """LR is logged with freq specified in train args until
 this many examples have been seen."""
 LR_LOG_FREQ_BATCHES = 2500
@@ -320,7 +320,6 @@ def optimize_model(
                     n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
-                    n_batches,
                 )
                 model.train()
             if n_batches in train_args.global_step_checkpoints:
@@ -331,7 +330,6 @@ def optimize_model(
                     n_batches * train_args.batch_size,
                     optimizer,
                     scheduler,
-                    n_batches,
                 )
         loss_disp /= local_step + 1
         logger.info(
@@ -342,6 +340,15 @@ def optimize_model(
         writer.add_scalar(
             "Loss/train", loss_disp, global_step=n_batches * train_args.batch_size
         )
+        save_checkpoint(
+            train_dev_args,
+            tokenizer,
+            model,
+            n_batches * train_args.batch_size,
+            optimizer,
+            scheduler,
+        )
+        save_checkpoint(train_dev_args, tokenizer, model, "last", optimizer, scheduler)
         dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
         for subset, value in dev_losses.items():
             logger.info(
@@ -607,7 +614,11 @@ def main(
                 optimizer, num_warmup_steps=args.train.warmup_steps
             )
     if ckpt_path is not None:
+        assert (
+            ckpt_path.name == "model.last"
+        ), "For reproducibility, load model saved at the end of the epoch"
         optimizer, scheduler = load_optimizer_scheduler(ckpt_path, optimizer, scheduler)
+
     inference_config, inference_data_loader = None, None
     if do_inference:
         inference_config = setup_inference_config(args, hyp_dir, override)
@@ -627,8 +638,6 @@ def main(
         inference_data_loader=inference_data_loader,
     )
     # TODO: SAVE EXPERIMENT CONFIG AS PER DECODE SCRIPT SO PARSER WORKS AS WELL
-    # TODO: CHECKPOINT END OF EPOCH
-    # TODO: PROPER REPRODUCIBILITY ON DATA LOADERS
 
 
 if __name__ == "__main__":
