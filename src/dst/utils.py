@@ -43,7 +43,14 @@ def set_seed(args):
 
 
 def save_checkpoint(
-    args, tokenizer, model, step_or_identifier: Union[str, int], optimizer, scheduler
+    args,
+    tokenizer,
+    model,
+    step_or_identifier: Union[str, int],
+    optimizer,
+    scheduler,
+    dev_jga: float = 0.0,
+    patience: int = 0,
 ):
     ckpt_path = Path(args.train.checkpoint_dir)
     ckpt_path = ckpt_path.joinpath(
@@ -57,6 +64,8 @@ def save_checkpoint(
     model.save_pretrained(save_path)
     OmegaConf.save(args, f"{ckpt_path}/model_config.yaml")
     state_dict = {"optimizer_state_dict": optimizer.state_dict()}
+    state_dict["dev_jga"] = dev_jga
+    state_dict["dev_jga_patience"] = patience
     if scheduler is not None:
         state_dict["scheduler_state_dict"] = scheduler.state_dict()
         state_dict["scheduler_last_epoch"] = scheduler.last_epoch
@@ -85,7 +94,12 @@ def load_optimizer_scheduler(ckpt_path: str, optimizer, scheduler):
             scheduler.last_epoch = checkpoint["scheduler_last_epoch"]
         except KeyError:
             logger.warning("Could not find key scheduler_last_epoch in state dict")
-    return optimizer, scheduler
+    metrics = {
+        "dev_jga": checkpoint["dev_jga"],
+        "dev_jga_patience": checkpoint["dev_jga_patience"],
+    }
+
+    return optimizer, scheduler, metrics
 
 
 def humanise(name: str, remove_trailing_numbers: bool = False) -> str:
