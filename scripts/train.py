@@ -162,7 +162,7 @@ def compute_task_oriented_metrics(
             inference_config, tokenizer, model, inference_data_loader, DEVICE
         )
         with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
-            json.dump(belief_states, f)
+            json.dump(belief_states, f, indent=4)
         assert isinstance(inference_config.dst_test_path, ListConfig)
         logger.info(f"Parsing model predictions at global step {global_step}")
         parser_inputs = setup_parser(
@@ -180,7 +180,7 @@ def compute_task_oriented_metrics(
             value_separator=inference_config.preprocessing.value_selection.value_separator,
             recase_categorical_values=inference_config.preprocessing.lowercase_model_targets,
             target_slot_index_separator=inference_config.preprocessing.target_slot_index_separator,
-            files_to_parse=inference_data_loader.dialogue_files,
+            files_to_parse=inference_data_loader.dataset.dialogue_files,
         )
         logger.info(f"Evaluating model predictions at global step {global_step}")
         evaluator_inputs = setup_evaluator_inputs(this_ckpt_hyp_path, inference_config)
