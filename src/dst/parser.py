@@ -1061,7 +1061,11 @@ def parse(
                     logging.warning(
                         f"Could not find dialogue {dialogue_id} in predicted states."
                     )
-                    raise KeyError
+                    if files_to_parse is not None:
+                        logger.info(f"Files to be parse: {files_to_parse}")
+                    else:
+                        raise KeyError
+                    continue
                 populate_dialogue_state(
                     predicted_data,
                     blank_dialogue,
@@ -1072,6 +1076,9 @@ def parse(
                     target_slot_index_separator=target_slot_index_separator,
                 )
             with open(output_dir.joinpath(file.name), "w") as f:
+                logger.info(
+                    f"Saving parsing results at {output_dir.joinpath(file.name)} "
+                )
                 json.dump(dialogue_templates, f, indent=4)
 
 
