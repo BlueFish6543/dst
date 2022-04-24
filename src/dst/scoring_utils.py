@@ -79,9 +79,11 @@ def setup_evaluator_inputs(
     A mapping containing the positional arguments of the official SGD evaluation script.
     """
     hyps_refs = load_hyps_and_refs(
-        hyp_path,
+        hyp_path.resolve(),
         pathlib.Path(inference_config.ref_path),
-        decoded_only=inference_config.decode_only,
+        decoded_only=inference_config.decode_only
+        if inference_config.decode_only
+        else None,
     )
     eval_schema_path = inference_config.ref_schema_path
     with open(eval_schema_path, "r") as f:
