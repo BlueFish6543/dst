@@ -231,14 +231,14 @@ class DSTDataset(torch.utils.data.Dataset):
                 dialogue_ids.update([e["dialogue_id"] for e in self.examples])
             else:
                 assert isinstance(example, dict)
-                dialogue_ids.update(example["dialogue_id"][0])
+                dialogue_ids.update(example["dialogue_id"])
         return dialogue_ids
 
     def _infer_dialogue_files(self):
         if self.data_size == -1 and not self.to_decode:
             return
         try:
-            data_pckg_or_path = self.args.ref_path
+            data_pckg_or_path = str(pathlib.Path(self.args.ref_path).parent)
         except AttributeError:
             return
         dialogue_ids = self._get_dialogue_ids()
@@ -511,7 +511,7 @@ class BatchedTestDataset(DSTDataset):
             train_schema = load_schema(args.orig_train_schema_path)
         # TODO: VERY BAD DESIGN, NEEDS REFACTORING
         super().__init__(args, tokenizer, data_paths, data_size, train_schema)
-        self._get_dialogue_ids()
+        self._infer_dialogue_files()
 
     def _create_examples(self):
         assert (
