@@ -49,6 +49,7 @@ def save_checkpoint(
     step_or_identifier: Union[str, int],
     optimizer,
     scheduler,
+    global_step,
     dev_jga: float = 0.0,
     patience: int = 0,
 ):
@@ -66,6 +67,7 @@ def save_checkpoint(
     state_dict = {"optimizer_state_dict": optimizer.state_dict()}
     state_dict["dev_jga"] = dev_jga
     state_dict["dev_jga_patience"] = patience
+    state_dict["global_step"] = global_step
     if scheduler is not None:
         state_dict["scheduler_state_dict"] = scheduler.state_dict()
         state_dict["scheduler_last_epoch"] = scheduler.last_epoch
@@ -94,12 +96,20 @@ def load_optimizer_scheduler(ckpt_path: str, optimizer, scheduler):
             scheduler.last_epoch = checkpoint["scheduler_last_epoch"]
         except KeyError:
             logger.warning("Could not find key scheduler_last_epoch in state dict")
-    metrics = {
-        "dev_jga": checkpoint["dev_jga"],
-        "dev_jga_patience": checkpoint["dev_jga_patience"],
-    }
-
-    return optimizer, scheduler, metrics
+    try:
+        metrics = {
+            "dev_jga": checkpoint["dev_jga"],
+            "dev_jga_patience": checkpoint["dev_jga_patience"],
+        }
+        global_step = checkpoint["global_step"]
+    except KeyError:
+        metrics = {}
+        if "global_step" not in checkpoint:
+            logger.warning(
+                "Could not find global_step in state dictionary. Defaulting to 0."
+            )
+        global_step = 0
+    return optimizer, scheduler, metrics, global_step
 
 
 def humanise(name: str, remove_trailing_numbers: bool = False) -> str:
