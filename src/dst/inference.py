@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 from tqdm import tqdm
 
 from dst.utils import (
@@ -93,7 +93,10 @@ def setup_inference_config(
     """Helper function to setup configuration for running inference during training."""
     split = infer_split_name_from_path(args.dev.dst_dev_path[0])
     inference_config = args.decode
-    assert isinstance(args.dev.dst_dev_path, list) and len(args.dev.dst_dev_path) == 1
+    assert (
+        isinstance(args.dev.dst_dev_path, ListConfig)
+        and len(args.dev.dst_dev_path) == 1
+    )
     # to call parser with the correct data configuration
     inference_config.preprocessing = args.data.preprocessing[args.dev.dst_dev_path[0]]
     inference_config.dst_test_path = args.dev.dst_dev_path
