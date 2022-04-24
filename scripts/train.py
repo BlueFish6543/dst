@@ -239,6 +239,10 @@ def optimize_model(
     max_patience = (dev_args.eval_interval // train_args.batch_size) / (
         dev_args.patience // train_args.batch_size
     )
+    # assume that for some reason we want to continue training
+    # after max dev jga stopped it
+    if initial_step != 0 and patience == max_patience:
+        patience = 0
     log_dir = (
         Path()
         .resolve()
