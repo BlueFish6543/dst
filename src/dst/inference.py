@@ -91,7 +91,7 @@ def setup_inference_config(
     args: DictConfig, hyp_dir: Optional[pathlib.Path] = None, override: bool = False
 ):
     """Helper function to setup configuration for running inference during training."""
-    split = infer_split_name_from_path(args.dev.dst_dev_path)
+    split = infer_split_name_from_path(args.dev.dst_dev_path[0])
     inference_config = args.decode
     assert isinstance(args.dev.dst_dev_path, list) and len(args.dev.dst_dev_path) == 1
     # to call parser with the correct data configuration
