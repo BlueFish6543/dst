@@ -231,7 +231,7 @@ class DSTDataset(torch.utils.data.Dataset):
                 dialogue_ids.update([e["dialogue_id"] for e in self.examples])
             else:
                 assert isinstance(example, dict)
-                dialogue_ids.add(example["dialogue_id"])
+                dialogue_ids.update(example["dialogue_id"][0])
         return dialogue_ids
 
     def _infer_dialogue_files(self):
@@ -528,6 +528,7 @@ class BatchedTestDataset(DSTDataset):
             "user_utterance": [],
             "service": [],
             "seen": [],
+            "dialogue_id": [],
         }
         this_batch = deepcopy(this_batch_template)
         n_frames = 0
