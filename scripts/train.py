@@ -10,7 +10,7 @@ from typing import Optional
 
 import click
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
@@ -163,7 +163,7 @@ def compute_task_oriented_metrics(
         )
         with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
             json.dump(belief_states, f)
-        assert isinstance(inference_config.dst_test_path, list)
+        assert isinstance(inference_config.dst_test_path, ListConfig)
         logger.info(f"Parsing model predictions at global step {global_step}")
         parser_inputs = setup_parser(
             inference_config.ref_schema_path,
