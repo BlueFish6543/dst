@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from dst.evaluation import get_metrics
 from dst.parser import parse
-from dst.scoring_utils import get_evaluator_inputs, get_in_domain_services
+from dst.scoring_utils import get_in_domain_services, load_hyps_and_refs
 from dst.utils import Schema
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ def test_parse(
         recase_categorical_values=recase_categorical_values,
         target_slot_index_separator=target_slot_index_separator,
     )
-    test_data = get_evaluator_inputs(
+    test_data = load_hyps_and_refs(
         parser_output_dir, SCHEMA_PATH_ROOT.joinpath(variant, split)
     )
     hyps, refs = test_data["dataset_hyp"], test_data["dataset_ref"]
