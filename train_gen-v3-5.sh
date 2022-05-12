@@ -10,9 +10,9 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J d3st_v35_aug_full_train
+#SBATCH -J d3st_v35_aug_full_train_adafactor
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
-#SBATCH -A GASIC-BHT26-SL2-GPU
+#SBATCH -A #######
 #! How many whole nodes should be allocated?
 #SBATCH --nodes=1
 #! How many (MPI) tasks will there be in total?
@@ -58,17 +58,23 @@ eval "$(conda shell.bash hook)"
 conda activate /home/ac2123/anaconda3/envs/dst
 which python
 
+if [ -z ${VERSION+x} ]; then
+  echo "Please pass an integer representing the data version to the evaluation command. For example prepend VERSION=1 to
+  test data preprocessed in folder */version_1/"
+  exit
+fi
+
 #! Full path to application executable:
 application="python -m scripts.train"
 
 #! Run options for the application:
-options="-s /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/raw/sgd/train/schema.json \
--d /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/original/dev/version_3/data.json \
--t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/original/train/version_3/data.json \
--t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/v3/train/version_3/data.json \
--t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/v4/train/version_3/data.json \
--t /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/v5/train/version_3/data.json \
--a configs/train_arguments.yaml -vvv"
+options="-s /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/raw/sgd/train/schema.json \
+-d /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/original/dev/$VERSION/data.json \
+-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/original/train/$VERSION/data.json \
+-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/v3/train/$VERSION/data.json \
+-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/v4/train/$VERSION/data.json \
+-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/seed_42_priority_median_med_round_up_0.25_max_sim_at_zero_70/v5/train/$VERSION/data.json \
+-a configs/hpc_train_arguments.yaml -vvv"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory

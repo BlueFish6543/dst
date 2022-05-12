@@ -80,7 +80,7 @@ def main(
     belief_path: pathlib.Path,
     schema_path: pathlib.Path,
     output_dir: Union[pathlib.Path, None],
-    dialogue_templates: pathlib.Path,
+    template_dir: pathlib.Path,
     test_path: pathlib.Path,
     log_level: int,
     files_to_parse: Optional[str],
@@ -118,7 +118,7 @@ def main(
         "belief_states.json"
     ).exists(), "Could not find belief state files"
     # Copy templates over first
-    copy_tree(str(dialogue_templates), str(output_dir))
+    copy_tree(str(template_dir), str(output_dir))
     logger.info(f"Parsing {belief_path} directory.")
     with open(belief_path.joinpath("belief_states.json"), "r") as f:
         predictions = json.load(f)
@@ -126,13 +126,14 @@ def main(
         preprocessed_refs = preprocessed_refs["data"]
     except KeyError:
         pass
+
     parse(
         schema,
         predictions,
         preprocessed_refs,
         output_dir,
         experiment_config,
-        files_to_parse=list(files_to_parse),
+        files_to_parse=None if not files_to_parse else list(files_to_parse),
     )
 
 
