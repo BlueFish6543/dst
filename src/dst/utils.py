@@ -8,9 +8,11 @@ import random
 import re
 from collections import defaultdict
 from datetime import datetime
+from functools import partial
+from itertools import repeat
 from operator import methodcaller
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -444,3 +446,19 @@ class PathMapping:
                     f"Keys available are schema and {*PathMapping.split_names,}"
                 )
             return self.schema_paths
+
+
+def nested_defaultdict(default_factory: Callable, depth: int = 1):
+    """Creates a nested default dictionary of arbitrary depth with a specified callable as leaf."""
+    if not depth:
+        return default_factory()
+    result = partial(defaultdict, default_factory)
+    for _ in repeat(None, depth - 1):
+        result = partial(defaultdict, result)
+    return result()
+
+
+def load_json(path: Path):
+    with open(path, "r") as f:
+        data = json.load(f)
+    return data
