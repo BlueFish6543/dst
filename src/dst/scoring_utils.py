@@ -95,6 +95,7 @@ def setup_evaluator_inputs(
         eval_schema_path,
         inference_config.orig_train_schema_path,
     )
+    logging.info(f"In domain services: {in_domain_services}")
     return {
         "eval_services": eval_services,
         "in_domain_services": in_domain_services,

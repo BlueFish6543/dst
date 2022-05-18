@@ -1,26 +1,33 @@
 #!/bin/bash
 
-declare -a sgd_step=(1840000)
-declare -a schema_variants=("original" "v1" "v2" "v3" "v4" "v5")
+if [ -z ${SHARDS+x} ]; then
+  echo "Please specify which SGD versions you would like to test on by prepending an array SHARDS= to the command.
+  For example, if you are decoding one model on original and v1 dataset the prepend SHARDS='original v1'. "
+  exit
+fi
+if [ -z ${STEP+x} ]; then
+  echo "Please specify which checkpoint should be parsed and scored by prepending STEP to your command. For example,
+  if you want to parse steps 1000 and 2000 then prepend STEP='1000 2000'"
+  exit
+fi
 
 if [ -z ${EXPERIMENT+x} ]; then
   echo "Please pass the experiment name to the evaluation command by prepending EXPERIMENT=my_experiment_name variable."
   exit
 fi
-
 if [ -z ${SPLIT+x} ]; then
   echo "Please pass the split to the evaluation command by prepending SPLIT=my_split_name variable. The split name
   should be one of 'dev', 'dev_small' or 'test'."
   exit
 fi
-
 if [ -z ${VERSION+x} ]; then
   echo "Please pass an integer representing the data version to the evaluation command. For example prepend VERSION=1 to
   test data preprocessed in folder */version_1/"
   exit
 fi
 
-
+schema_variants=($SHARDS)
+sgd_step=($STEP)
 HYPS_BASE_DIR=hyps
 echo "Base directory where hypotheses are found is $HYPS_BASE_DIR"
 echo "Converting decoder output to SGD format ..."
