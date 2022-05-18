@@ -1,18 +1,32 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
-from collections import defaultdict
 from copy import deepcopy
-from functools import partial
-from itertools import repeat
 from pathlib import Path
-from typing import Callable
 
+import click
 import numpy as np
-from prettyprinter import pprint
 
-from dst.utils import aggregate_values, default_to_regular
+from src.dst.scoring_utils import get_in_domain_services
+from src.dst.utils import (
+    aggregate_values,
+    default_to_regular,
+    load_json,
+    nested_defaultdict,
+)
+
+_SPLIT = "test"
+_CHECKPOINT_PREFIX = "model"
+
+TRACKED_METRICS = [
+    "joint_goal_accuracy",
+    "joint_cat_accuracy",
+    "joint_noncat_accuracy",
+]
+
+logger = logging.getLogger(__name__)
 
 
 def get_service_set(schema_path):
@@ -23,27 +37,6 @@ def get_service_set(schema_path):
         for service in schema:
             service_set.add(service["service_name"])
     return service_set
-
-
-def get_in_domain_services(schema_path_1, schema_path_2):
-    """Get the set of common services between two schemas."""
-    return get_service_set(schema_path_1) & get_service_set(schema_path_2)
-
-
-def load_json(path: Path):
-    with open(path, "r") as f:
-        data = json.load(f)
-    return data
-
-
-def nested_defaultdict(default_factory: Callable, depth: int = 1):
-    """Creates a nested default dictionary of arbitrary depth with a specified callable as leaf."""
-    if not depth:
-        return default_factory()
-    result = partial(defaultdict, default_factory)
-    for _ in repeat(None, depth - 1):
-        result = partial(defaultdict, result)
-    return result()
 
 
 def check_processing(
@@ -71,42 +64,83 @@ def get_metric_sensitivity(scores: np.ndarray) -> float:
     return np.nanmean(std / mean)
 
 
-def main():
-    split = "test"
-    METRICS_SOURCE_DIR = "metrics"
-    HYPS_SOURCE_DIR = "hyps"
-    MODEL_INPUT_DATA_VERSION = "version_3"
-    SCHEMA_VARIANTS = ["v1", "v2", "v3", "v4", "v5"]
-    # SCHEMA_VARIANTS = ["v1", "v2",]
+@click.command()
+@click.option(
+    "-vars",
+    "--variants",
+    "schema_variants",
+    default=("v1", "v2", "v3", "v4", "v5"),
+    multiple=True,
+    help="Which variants will be used for computing SGD-X metrics",
+)
+@click.option(
+    "-ver",
+    "--version",
+    "version",
+    default=None,
+    type=str,
+    required=True,
+    help="The data version on which the model was trained on. Should be in the format version_*.",
+)
+@click.option(
+    "-h",
+    "--hyps_source_dir",
+    "hyps_source_dir",
+    default="hyps",
+    type=str,
+    help="Absolute to the path where the hypothesis for the models specified with -m/--models "
+    "option are located",
+)
+@click.option(
+    "-mod",
+    "--models",
+    "models",
+    multiple=True,
+    required=True,
+    help="Names of the experiments for which SGD-X metrics are to be computed. This should be "
+    "a subset of the names of the directories listed under -h/--hyps_source_dir option.",
+)
+@click.option(
+    "-m",
+    "--metric",
+    "metric",
+    default="joint_goal_accuracy",
+    type=str,
+    help="Performance measure for which the SGD-X metrics should be evaluated. This should be a valid"
+    "metric in the SGD evaluation output (e.g., joint_goal_accuracy)",
+)
+def main(
+    schema_variants: tuple[str],
+    hyps_source_dir: str,
+    version: str,
+    models: tuple[str],
+    metric: str,
+):
 
-    # MODELS = ['d3st', 'pegasus_schema_aug']
-    MODELS = ["seed_20220303_d3st_sgd_x_oracle"]
-    basic_metrics = [
-        "joint_goal_accuracy",
-        "joint_cat_accuracy",
-        "joint_noncat_accuracy",
-    ]
-    METRICS = {m: basic_metrics for m in MODELS}
-
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        level=logging.INFO,
+    )
+    # TODO: SAVE SGD_X METRICS IN .JSON FORMAT IN APPROPRIATE LOCATION
+    assert isinstance(schema_variants, tuple)
+    schema_variants = list(schema_variants)
     frame_metric_paths = nested_defaultdict(list, depth=3)
-    for model in MODELS:
-        for variant in SCHEMA_VARIANTS:
+    for model in models:
+        for variant in schema_variants:
             this_model_schema_variant_paths = list(
-                Path("..")
+                Path(".")
                 .resolve()
-                .joinpath(
-                    HYPS_SOURCE_DIR, model, variant, split, MODEL_INPUT_DATA_VERSION
-                )
-                .glob("model*")
+                .joinpath(hyps_source_dir, model, variant, _SPLIT, version)
+                .glob(f"{_CHECKPOINT_PREFIX}*")
             )
             this_model_schema_variant_paths = sorted(
                 this_model_schema_variant_paths,
                 key=lambda pth: int(pth.name.split(".")[1]),
             )
-            print(
+            logger.info(
                 f"Paths for model {model}, schema variant {variant}, {this_model_schema_variant_paths}"
             )
-            frame_metric_paths[model][variant][split].extend(
+            frame_metric_paths[model][variant][_SPLIT].extend(
                 [
                     p.joinpath("metrics_and_dialogues.json")
                     for p in this_model_schema_variant_paths
@@ -114,19 +148,18 @@ def main():
             )
 
     frame_metrics = nested_defaultdict(list, depth=3)
-    for model in MODELS:
-        for variant in SCHEMA_VARIANTS:
-            frame_metrics[model][variant][split] = [
-                load_json(pth) for pth in frame_metric_paths[model][variant][split]
+    for model in models:
+        for variant in schema_variants:
+            frame_metrics[model][variant][_SPLIT] = [
+                load_json(pth) for pth in frame_metric_paths[model][variant][_SPLIT]
             ]
 
     # Metric to use
-    metric = "joint_goal_accuracy"
     orig_train_schema_path = (
-        Path("..").resolve().joinpath("data/raw/sgd/train/schema.json")
+        Path(".").resolve().joinpath("data/raw/sgd/train/schema.json")
     )
     orig_test_schema_path = (
-        Path("..").resolve().joinpath("data/raw/sgd/test/schema.json")
+        Path(".").resolve().joinpath("data/raw/sgd/test/schema.json")
     )
     in_domain_services = get_in_domain_services(
         orig_train_schema_path, orig_test_schema_path
@@ -138,15 +171,15 @@ def main():
     all_scores_reduced = nested_defaultdict(list, depth=2)
     seen_scores_reduced = nested_defaultdict(list, depth=2)
     unseen_scores_reduced = nested_defaultdict(list, depth=2)
-    for model in MODELS:
+    for model in models:
         (
-            all_scores_across_varaints,
+            all_scores_across_variants,
             seen_scores_across_variants,
             unseen_scores_across_variants,
         ) = ([], [], [])
-        for variant in SCHEMA_VARIANTS:
+        for variant in schema_variants:
             for step_idx, this_step_frame_metrics in enumerate(
-                frame_metrics[model][variant][split]
+                frame_metrics[model][variant][_SPLIT]
             ):
                 (
                     this_step_idx_all_scores,
@@ -171,100 +204,102 @@ def main():
                 assert len(this_step_idx_unseen_scores) + len(
                     this_step_idx_seen_scores
                 ) == len(this_step_idx_all_scores)
-                all_scores[model][variant][split].append(this_step_idx_all_scores)
-                seen_scores[model][variant][split].append(this_step_idx_seen_scores)
-                unseen_scores[model][variant][split].append(this_step_idx_unseen_scores)
-            if not all_scores_across_varaints:
-                for model_step in range(len(all_scores[model][variant][split])):
-                    all_scores_across_varaints.append(
-                        [all_scores[model][variant][split][model_step]]
+                all_scores[model][variant][_SPLIT].append(this_step_idx_all_scores)
+                seen_scores[model][variant][_SPLIT].append(this_step_idx_seen_scores)
+                unseen_scores[model][variant][_SPLIT].append(
+                    this_step_idx_unseen_scores
+                )
+            if not all_scores_across_variants:
+                for model_step in range(len(all_scores[model][variant][_SPLIT])):
+                    all_scores_across_variants.append(
+                        [all_scores[model][variant][_SPLIT][model_step]]
                     )
             else:
-                for model_step in range(len(all_scores[model][variant][split])):
-                    all_scores_across_varaints[model_step].append(
-                        all_scores[model][variant][split][model_step]
+                for model_step in range(len(all_scores[model][variant][_SPLIT])):
+                    all_scores_across_variants[model_step].append(
+                        all_scores[model][variant][_SPLIT][model_step]
                     )
             if not seen_scores_across_variants:
-                for model_step in range(len(seen_scores[model][variant][split])):
+                for model_step in range(len(seen_scores[model][variant][_SPLIT])):
                     seen_scores_across_variants.append(
-                        [seen_scores[model][variant][split][model_step]]
+                        [seen_scores[model][variant][_SPLIT][model_step]]
                     )
             else:
-                for model_step in range(len(seen_scores[model][variant][split])):
+                for model_step in range(len(seen_scores[model][variant][_SPLIT])):
                     seen_scores_across_variants[model_step].append(
-                        seen_scores[model][variant][split][model_step]
+                        seen_scores[model][variant][_SPLIT][model_step]
                     )
             if not unseen_scores_across_variants:
-                for model_step in range(len(unseen_scores[model][variant][split])):
+                for model_step in range(len(unseen_scores[model][variant][_SPLIT])):
                     unseen_scores_across_variants.append(
-                        [unseen_scores[model][variant][split][model_step]]
+                        [unseen_scores[model][variant][_SPLIT][model_step]]
                     )
             else:
-                for model_step in range(len(unseen_scores[model][variant][split])):
+                for model_step in range(len(unseen_scores[model][variant][_SPLIT])):
                     unseen_scores_across_variants[model_step].append(
-                        unseen_scores[model][variant][split][model_step]
+                        unseen_scores[model][variant][_SPLIT][model_step]
                     )
-        print("Model", model)
+        logger.info(f"Model {model}")
         variant_aggregated_scores = deepcopy(all_scores[model])
-        aggregate_values(variant_aggregated_scores, "mean")
-        print("Variant scores")
-        pprint(default_to_regular(variant_aggregated_scores))
-        all_scores_reduced[model][split] = all_scores_across_varaints
-        seen_scores_reduced[model][split] = seen_scores_across_variants
-        unseen_scores_reduced[model][split] = unseen_scores_across_variants
-        check_processing(all_scores, all_scores_reduced, SCHEMA_VARIANTS, model, split)
+        aggregate_values(variant_aggregated_scores, "mean", reduce=False)
+        logger.info("Variant scores")
+        logger.info(default_to_regular(variant_aggregated_scores))
+        all_scores_reduced[model][_SPLIT] = all_scores_across_variants
+        seen_scores_reduced[model][_SPLIT] = seen_scores_across_variants
+        unseen_scores_reduced[model][_SPLIT] = unseen_scores_across_variants
+        check_processing(all_scores, all_scores_reduced, schema_variants, model, _SPLIT)
         check_processing(
-            seen_scores, seen_scores_reduced, SCHEMA_VARIANTS, model, split
+            seen_scores, seen_scores_reduced, schema_variants, model, _SPLIT
         )
         check_processing(
-            unseen_scores, unseen_scores_reduced, SCHEMA_VARIANTS, model, split
+            unseen_scores, unseen_scores_reduced, schema_variants, model, _SPLIT
         )
 
     # convert reduced scores to 2-D tensor containing metrics for all variants for each model optimisation step
     all_scores_arrays = nested_defaultdict(list, depth=2)
     seen_scores_arrays = nested_defaultdict(list, depth=2)
     unseen_scores_arrays = nested_defaultdict(list, depth=2)
-    for model in MODELS:
-        all_scores_arrays[model][split] = [
+    for model in models:
+        all_scores_arrays[model][_SPLIT] = [
             np.asarray(all_variant_scores)
-            for all_variant_scores in all_scores_reduced[model][split]
+            for all_variant_scores in all_scores_reduced[model][_SPLIT]
         ]
-        seen_scores_arrays[model][split] = [
+        seen_scores_arrays[model][_SPLIT] = [
             np.asarray(all_variants_seen_scores)
-            for all_variants_seen_scores in seen_scores_reduced[model][split]
+            for all_variants_seen_scores in seen_scores_reduced[model][_SPLIT]
         ]
-        unseen_scores_arrays[model][split] = [
+        unseen_scores_arrays[model][_SPLIT] = [
             np.asarray(all_variants_unseen_scores)
-            for all_variants_unseen_scores in unseen_scores_reduced[model][split]
+            for all_variants_unseen_scores in unseen_scores_reduced[model][_SPLIT]
         ]
 
     # calculate JGA 1-5
     all_jga_avg = nested_defaultdict(list, depth=2)
     seen_jga_avg = nested_defaultdict(list, depth=2)
     unseen_jga_avg = nested_defaultdict(list, depth=2)
-    print(f"Reporting metric: {metric}]")
-    for model in MODELS:
-        print("Model", model)
-        all_jga_avg[model][split] = [
-            np.mean(arr) for arr in all_scores_arrays[model][split]
+    logger.info(f"Reporting metric: {metric}")
+    for model in models:
+        logger.info(f"Model {model}")
+        all_jga_avg[model][_SPLIT] = [
+            np.mean(arr) for arr in all_scores_arrays[model][_SPLIT]
         ]
-        seen_jga_avg[model][split] = [
-            np.mean(arr) for arr in seen_scores_arrays[model][split]
+        seen_jga_avg[model][_SPLIT] = [
+            np.mean(arr) for arr in seen_scores_arrays[model][_SPLIT]
         ]
-        unseen_jga_avg[model][split] = [
-            np.mean(arr) for arr in unseen_scores_arrays[model][split]
+        unseen_jga_avg[model][_SPLIT] = [
+            np.mean(arr) for arr in unseen_scores_arrays[model][_SPLIT]
         ]
-        print(
-            f"Average JGA for schema variants {SCHEMA_VARIANTS} on all services. Model {model}, split {split}.",
-            all_jga_avg[model][split],
+        logger.info(
+            f"Average JGA for schema variants {schema_variants} on all services. Model {model}, split {_SPLIT}. "
+            f"{all_jga_avg[model][_SPLIT]}",
         )
-        print(
-            f"Average JGA for schema variants {SCHEMA_VARIANTS} on seen services. Model {model}, split {split}.",
-            seen_jga_avg[model][split],
+        logger.info(
+            f"Average JGA for schema variants {schema_variants} on seen services. Model {model}, split {_SPLIT}. "
+            f"{seen_jga_avg[model][_SPLIT]}",
         )
-        print(
-            f"Average JGA for schema variants {SCHEMA_VARIANTS} on unseen services. Model {model}, split {split}.",
-            unseen_jga_avg[model][split],
+        logger.info(
+            f"Average JGA for schema variants {schema_variants} on unseen services. Model {model}, split {_SPLIT}. "
+            f"{unseen_jga_avg[model][_SPLIT]}",
         )
 
     # calculate SS
@@ -272,27 +307,27 @@ def main():
     seen_ss = nested_defaultdict(list, depth=2)
     unseen_ss = nested_defaultdict(list, depth=2)
 
-    for model in MODELS:
-        all_ss[model][split] = [
-            get_metric_sensitivity(arr) for arr in all_scores_arrays[model][split]
+    for model in models:
+        all_ss[model][_SPLIT] = [
+            get_metric_sensitivity(arr) for arr in all_scores_arrays[model][_SPLIT]
         ]
-        seen_ss[model][split] = [
-            get_metric_sensitivity(arr) for arr in seen_scores_arrays[model][split]
+        seen_ss[model][_SPLIT] = [
+            get_metric_sensitivity(arr) for arr in seen_scores_arrays[model][_SPLIT]
         ]
-        unseen_ss[model][split] = [
-            get_metric_sensitivity(arr) for arr in unseen_scores_arrays[model][split]
+        unseen_ss[model][_SPLIT] = [
+            get_metric_sensitivity(arr) for arr in unseen_scores_arrays[model][_SPLIT]
         ]
-        print(
-            f"Schema sensitivity for schema variants {SCHEMA_VARIANTS} on all services. Model {model}, split {split}.",
-            all_ss[model][split],
+        logger.info(
+            f"Schema sensitivity for schema variants {schema_variants} on all services. Model {model}, split {_SPLIT}. "
+            f"{all_ss[model][_SPLIT]}",
         )
-        print(
-            f"Schema sensitivity for schema variants {SCHEMA_VARIANTS} on seen services. Model {model}, split {split}.",
-            seen_ss[model][split],
+        logger.info(
+            f"Schema sensitivity for schema variants {schema_variants} on seen services. Model {model}, "
+            f"split {_SPLIT}. {seen_ss[model][_SPLIT]}",
         )
-        print(
-            f"Schema sensitivity for schema variants {SCHEMA_VARIANTS} on unseen services. Model {model}, split {split}.",
-            unseen_ss[model][split],
+        logger.info(
+            f"Schema sensitivity for schema variants {schema_variants} on unseen services. Model {model}, "
+            f"split {_SPLIT}. {unseen_ss[model][_SPLIT]}"
         )
 
 
