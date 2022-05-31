@@ -12,6 +12,7 @@ import numpy as np
 from src.dst.scoring_utils import get_in_domain_services
 from src.dst.utils import (
     aggregate_values,
+    append_to_values,
     default_to_regular,
     load_json,
     nested_defaultdict,
@@ -25,7 +26,6 @@ TRACKED_METRICS = [
     "joint_cat_accuracy",
     "joint_noncat_accuracy",
 ]
-
 logger = logging.getLogger(__name__)
 
 
@@ -109,12 +109,20 @@ def get_metric_sensitivity(scores: np.ndarray) -> float:
     help="Performance measure for which the SGD-X metrics should be evaluated. This should be a valid"
     "metric in the SGD evaluation output (e.g., joint_goal_accuracy)",
 )
+@click.option(
+    "-a",
+    "--average",
+    "average_across_models",
+    is_flag=True,
+    default=False,
+)
 def main(
     schema_variants: tuple[str],
     hyps_source_dir: str,
     version: str,
     models: tuple[str],
     metric: str,
+    average_across_models: bool,
 ):
 
     logging.basicConfig(
@@ -171,6 +179,7 @@ def main(
     all_scores_reduced = nested_defaultdict(list, depth=2)
     seen_scores_reduced = nested_defaultdict(list, depth=2)
     unseen_scores_reduced = nested_defaultdict(list, depth=2)
+    average_across_variants = nested_defaultdict(list, depth=2)
     for model in models:
         (
             all_scores_across_variants,
@@ -243,7 +252,12 @@ def main(
         variant_aggregated_scores = deepcopy(all_scores[model])
         aggregate_values(variant_aggregated_scores, "mean", reduce=False)
         logger.info("Variant scores")
-        logger.info(default_to_regular(variant_aggregated_scores))
+        variant_aggregated_scores = default_to_regular(variant_aggregated_scores)
+        logger.info(variant_aggregated_scores)
+        if average_across_models:
+            append_to_values(
+                average_across_variants, deepcopy(variant_aggregated_scores)
+            )
         all_scores_reduced[model][_SPLIT] = all_scores_across_variants
         seen_scores_reduced[model][_SPLIT] = seen_scores_across_variants
         unseen_scores_reduced[model][_SPLIT] = unseen_scores_across_variants
@@ -254,7 +268,10 @@ def main(
         check_processing(
             unseen_scores, unseen_scores_reduced, schema_variants, model, _SPLIT
         )
-
+    if average_across_models:
+        aggregate_values(average_across_variants, "mean")
+        logger.info(f"Average across variants for models {models}")
+        logger.info(default_to_regular(average_across_variants))
     # convert reduced scores to 2-D tensor containing metrics for all variants for each model optimisation step
     all_scores_arrays = nested_defaultdict(list, depth=2)
     seen_scores_arrays = nested_defaultdict(list, depth=2)
@@ -278,6 +295,7 @@ def main(
     seen_jga_avg = nested_defaultdict(list, depth=2)
     unseen_jga_avg = nested_defaultdict(list, depth=2)
     logger.info(f"Reporting metric: {metric}")
+    jga_across_models = nested_defaultdict(list, depth=2)
     for model in models:
         logger.info(f"Model {model}")
         all_jga_avg[model][_SPLIT] = [
@@ -301,8 +319,22 @@ def main(
             f"Average JGA for schema variants {schema_variants} on unseen services. Model {model}, split {_SPLIT}. "
             f"{unseen_jga_avg[model][_SPLIT]}",
         )
+        if average_across_models:
+            append_to_values(
+                jga_across_models,
+                {
+                    "seen": seen_jga_avg[model][_SPLIT],
+                    "unseen": unseen_jga_avg[model][_SPLIT],
+                    "all": all_jga_avg[model][_SPLIT],
+                },
+            )
+    if average_across_models:
+        logger.info("Average JGA across models")
+        aggregate_values(jga_across_models, "mean")
+        logger.info(default_to_regular(jga_across_models))
 
     # calculate SS
+    ss_across_models = nested_defaultdict(list, depth=2)
     all_ss = nested_defaultdict(list, depth=2)
     seen_ss = nested_defaultdict(list, depth=2)
     unseen_ss = nested_defaultdict(list, depth=2)
@@ -329,6 +361,19 @@ def main(
             f"Schema sensitivity for schema variants {schema_variants} on unseen services. Model {model}, "
             f"split {_SPLIT}. {unseen_ss[model][_SPLIT]}"
         )
+        if average_across_models:
+            append_to_values(
+                ss_across_models,
+                {
+                    "seen": seen_ss[model][_SPLIT],
+                    "unseen": unseen_ss[model][_SPLIT],
+                    "all": all_ss[model][_SPLIT],
+                },
+            )
+    if average_across_models:
+        logger.info("Average SS across models")
+        aggregate_values(ss_across_models, "mean")
+        logger.info(default_to_regular(ss_across_models))
 
 
 if __name__ == "__main__":
