@@ -458,6 +458,52 @@ def nested_defaultdict(default_factory: Callable, depth: int = 1):
     return result()
 
 
+def append_to_values(result: dict, new_data: dict):
+    """Recursively appends to the values of `result` the values in
+    `new_data` that have the same keys. If the keys in `new_data`
+    do not exist in `result`, they are recursively added. The keys of
+    `new_data` can be either lists or single float objects that
+    are to be appended to existing `result` keys. List concatenation is
+    performed in former case.
+
+    Parameters
+    ----------
+    result
+        Mapping whose values are to be extended with corresponding values from
+        `new_data_map`
+    new_data
+        Data with which the values of `result_map` are extended.
+    """
+
+    def dict_factory():
+        return defaultdict(list)
+
+    for key in new_data:
+        # recursively add any new keys to the result mapping
+        if key not in result:
+            if isinstance(new_data[key], dict):
+                result[key] = dict_factory()
+                append_to_values(result[key], new_data[key])
+            else:
+                if isinstance(new_data[key], float):
+                    result[key] = [new_data[key]]
+                elif isinstance(new_data[key], list):
+                    result[key] = [*new_data[key]]
+                else:
+                    raise ValueError("Unexpected key type.")
+        # updated existing values with the value present in `new_data_map`
+        else:
+            if isinstance(result[key], dict):
+                append_to_values(result[key], new_data[key])
+            else:
+                if isinstance(new_data[key], list):
+                    result[key] += new_data[key]
+                elif isinstance(new_data[key], float):
+                    result[key].append(new_data[key])
+                else:
+                    raise ValueError("Unexpected key type")
+
+
 def load_json(path: Path):
     with open(path, "r") as f:
         data = json.load(f)
