@@ -1,56 +1,67 @@
 #!/bin/bash
 
 if [ -z ${SHARDS+x} ]; then
-  echo "Please specify which SGD versions you would like to test on by prepending an array SHARDS= to the command.
-  For example, if you are decoding one model on original and v1 dataset the prepend SHARDS='original v1'. "
+  echo "SHARDS has not been specified, all variants and the original schema will be parsed"
+  SHARDS="original v1 v2 v3 v4 v5"
+fi
+if [ -z ${EXPERIMENTS+x} ]; then
+  echo "Please pass the names of the experiments to be parsed and scored as a space separated string to the evaluation command by prepending EXPERIMENTS=\"experiment_1 experiment_2 \"  variable."
   exit
 fi
-if [ -z ${STEP+x} ]; then
-  echo "Please specify which checkpoint should be parsed and scored by prepending STEP to your command. For example,
-  if you want to parse steps 1000 and 2000 then prepend STEP='1000 2000'"
-  exit
-fi
-
-if [ -z ${EXPERIMENT+x} ]; then
-  echo "Please pass the experiment name to the evaluation command by prepending EXPERIMENT=my_experiment_name variable."
+if [ -z ${STEPS+x} ]; then
+  echo "Please specify a space separated string indicating which steps are to be decoded by prepending STEPS= to the evaluation command. Should have the same len as EXPERIMENTS"
   exit
 fi
 if [ -z ${SPLIT+x} ]; then
-  echo "Please pass the split to the evaluation command by prepending SPLIT=my_split_name variable. The split name
-  should be one of 'dev', 'dev_small' or 'test'."
-  exit
+  echo "SPLIT variable was not specified, defaulting to SPLIT=test"
+  SPLIT="test"
 fi
-if [ -z ${VERSION+x} ]; then
-  echo "Please pass an integer representing the data version to the evaluation command. For example prepend VERSION=1 to
-  test data preprocessed in folder */version_1/"
+if [ -z ${VERSIONS+x} ]; then
+  echo "Please specify the input data version for each experiment. For example prepend VERSION=\"1 1\" if you are parsing and scoring two experiments trained with input data version 1"
   exit
 fi
 
 schema_variants=($SHARDS)
-sgd_step=($STEP)
+sgd_step=($STEPS)
+experiments=($EXPERIMENTS)
+input_versions=($VERSIONS)
+NUMBER_OF_EXPERIMENTS="${#experiments[@]}"
+NUMBER_OF_VERSIONS="${#input_versions[@]}"
+NUMBER_OF_STEPS="${#sgd_step[@]}"
+
+if [ "$NUMBER_OF_EXPERIMENTS" -ne "$NUMBER_OF_VERSIONS" ]; then
+  echo "Number of models is $NUMBER_OF_EXPERIMENTS but only got $NUMBER_OF_VERSIONS in the data versions array so cannot determine version. Aborting."
+  exit
+fi
+if [ "$NUMBER_OF_EXPERIMENTS" -ne "$NUMBER_OF_VERSIONS" ]; then
+  echo "Number of models is $NUMBER_OF_EXPERIMENTS but only got $NUMBER_OF_STEPS elements specifying which step to decode for each model. Please specify which step to decode for each experiment.Aborting."
+  exit
+fi
+
 HYPS_BASE_DIR=hyps
 echo "Base directory where hypotheses are found is $HYPS_BASE_DIR"
-echo "Converting decoder output to SGD format ..."
-for step in "${sgd_step[@]}"; do
-  echo "Parsing predictions of model at step $step"
+for i in "${!experiments[@]}"; do
+  experiment="${experiments[i]}"
+  step="${sgd_step[i]}"
+  input_version="${input_versions[i]}"
+  echo "Parsing predictions of model $experiment at step $step"
+  echo "Converting decoder output to SGD format ..."
   for variant in "${schema_variants[@]}"; do
     echo "Parsing schema variant: $variant"
     python -m scripts.parse \
-      --belief_path "$HYPS_BASE_DIR"/"$EXPERIMENT"/"$variant"/"$SPLIT"/version_"$VERSION"/model."$step" \
+      --belief_path "$HYPS_BASE_DIR"/"$experiment"/"$variant"/"$SPLIT"/version_"$input_version"/model."$step" \
       --schema_path /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/raw/"$variant"/"$SPLIT"/schema.json \
       --template_dir data/interim/blank_dialogue_templates/"$variant"/"$SPLIT" \
-      --test_data /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/"$variant"/"$SPLIT"/version_"$VERSION"/data.json -vvv
-    mkdir -p "metrics/$EXPERIMENT/$variant/$SPLIT/version_$VERSION"
+      --test_data /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/preprocessed/"$variant"/"$SPLIT"/version_"$input_version"/data.json -vvv
+    mkdir -p "metrics/$experiment/$variant/$SPLIT/version_$input_version"
   done
-done
-echo "Scoring hypotheses..."
-for step in "${sgd_step[@]}"; do
-    for variant in "${schema_variants[@]}"; do
-      echo "Scoring model at step $step, schema variant $variant"
-      python -m scripts.score \
-        --prediction_dir "$HYPS_BASE_DIR"/"$EXPERIMENT"/"$variant"/"$SPLIT"/version_"$VERSION"/model."$step" \
-        --raw_data_dir /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/raw/"$variant" \
-        --eval_set "$SPLIT" \
-        --output_metric_file metrics/"$EXPERIMENT"/"$variant"/"$SPLIT"/version_"$VERSION"/model_"$step"_metrics.json
-    done
+  echo "Scoring hypotheses..."
+  for variant in "${schema_variants[@]}"; do
+    echo "Scoring model $experiment at step $step, schema variant $variant... "
+    python -m scripts.score \
+      --prediction_dir "$HYPS_BASE_DIR"/"$experiment"/"$variant"/"$SPLIT"/version_"$input_version"/model."$step" \
+      --raw_data_dir /scratches/neuron/dev/robust_paraphrases/dstc8-schema-guided-dialogue/sgd_x/data/raw/"$variant" \
+      --eval_set "$SPLIT" \
+      --output_metric_file metrics/"$experiment"/"$variant"/"$SPLIT"/version_"$input_version"/model_"$step"_metrics.json
+  done
 done
