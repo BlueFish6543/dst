@@ -106,6 +106,7 @@ options="-s /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/raw/sgd/train/sche
 --template_dir /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/interim/blank_dialogue_templates/original/dev
 --restore /home/$CRS/rds/rds-wjb31-nmt2020/$CRS/d3st/models/$EXPERIMENT/version_$VERSION/model.last
 --do_inference
+--override
 -a configs/$ARGS_REL_PATH -vvv"
 
 #! Work directory (i.e. where the job will run):
