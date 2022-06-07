@@ -264,6 +264,7 @@ def optimize_model(
     logger.info(f"Tensorboard logs saved at: {log_dir}")
     eval_step = dev_args.eval_interval // train_args.batch_size
     n_batches = initial_step // train_args.batch_size
+    start_epoch = initial_step // len(train_dataloader)
     dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
     dev_jga = max_dev_jga
     for subset, value in dev_losses.items():
@@ -275,7 +276,7 @@ def optimize_model(
             )
     logger.info(f"Start training at global step {n_batches}!")
     stop_training = False
-    for epoch in range(train_args.epochs):
+    for epoch in range(start_epoch, train_args.epochs):
         # Initialise for each epoch
         start_time = time.time()
         loss_disp = 0
