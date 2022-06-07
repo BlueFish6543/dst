@@ -273,7 +273,7 @@ def optimize_model(
             writer.add_scalar(
                 f"Loss/{subset}", value, global_step=n_batches * train_args.batch_size
             )
-    logger.info("Start training!")
+    logger.info(f"Start training at global step {n_batches}!")
     stop_training = False
     for epoch in range(train_args.epochs):
         # Initialise for each epoch
@@ -685,7 +685,7 @@ def main(
         assert (
             ckpt_path.name == "model.last"
         ), "For reproducibility, load model saved at the end of the epoch"
-        optimizer, scheduler, metrics, inital_step = load_optimizer_scheduler(
+        optimizer, scheduler, metrics, initial_step = load_optimizer_scheduler(
             ckpt_path, optimizer, scheduler
         )
 
