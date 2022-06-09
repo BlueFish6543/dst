@@ -57,6 +57,11 @@ if [ -z ${CONDA_ENV_PATH+x} ]; then
   exit
 fi
 
+if [ -z ${CRS+x} ]; then
+  echo "Please enter your CRS. For example prepend CRS=ac2123"
+  exit
+fi
+
 #! Insert additional module load commands after this line if needed:
 module load python/3.8
 module load miniconda/3
@@ -104,14 +109,14 @@ CHECKPOINT_DIR="${CHECKPOINT_DIRS[$SLURM_ARRAY_TASK_ID]}"
 VERSION="${VERSIONS[$SLURM_ARRAY_TASK_ID]}"
 
 #! Full path to application executable:
-application="python -u -m scripts.decode"
+application="python -u -m scripts.batch_decode"
 
 #! Run options for the application:
 options="-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/$SGD_SHARD/test/version_$VERSION/data.json \
 -a /home/ac2123/rds/rds-wjb31-nmt2020/ac2123/d3st/configs/hpc_decode_arguments.yaml \
 -s /home/ac2123/rds/hpc-work/dstc8-schema-guided-dialogue/sgd_x/data/original/train/schema.json \
 -c $CHECKPOINT_DIR \
--hyp /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/hyps -vvv"
+-hyp /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/hyps -vvv --test"
 
 #! Work directory (i.e. where the job will run):
 workdir="$SLURM_SUBMIT_DIR"  # The value of SLURM_SUBMIT_DIR sets workdir to the directory
