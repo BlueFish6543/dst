@@ -10,7 +10,7 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J d3st_v35
+#SBATCH -J gpu_job
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
 #SBATCH -A GASIC-BHT26-SL2-GPU
 #! How many whole nodes should be allocated?
@@ -22,7 +22,7 @@
 #! Note that the job submission script will enforce no more than 32 cpus per GPU.
 #SBATCH --gres=gpu:1
 #! How much wallclock time will be required?
-#SBATCH --time=36:00:00
+#SBATCH --time=24:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=NONE
 #! Uncomment this to prevent the job from being requeued (e.g. if
@@ -95,6 +95,8 @@ options="-s /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/raw/sgd/train/sche
 -d /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/original/dev/version_$VERSION/data.json \
 -t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/$AUG_DATA_DIR/original/train/version_$VERSION/data.json \
 -t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/$AUG_DATA_DIR/v1/train/version_$VERSION/data.json \
+-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/$AUG_DATA_DIR/v2/train/version_$VERSION/data.json \
+-t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/$AUG_DATA_DIR/v3/train/version_$VERSION/data.json \
 --ref_dir /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/raw/original/dev
 --template_dir /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/interim/blank_dialogue_templates/original/dev
 --do_inference
