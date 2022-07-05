@@ -249,6 +249,7 @@ def optimize_model(
     logger.info(
         f"Training will stop if dev JGA does not improve after {max_patience} inference evaluations"
     )
+    logger.info(f"Remaining tries: {max_patience - patience}")
     # assume that for some reason we want to continue training
     # after max dev jga stopped it
     if initial_step != 0 and patience == max_patience:
@@ -264,7 +265,7 @@ def optimize_model(
     logger.info(f"Tensorboard logs saved at: {log_dir}")
     eval_step = dev_args.eval_interval // train_args.batch_size
     n_batches = initial_step // train_args.batch_size
-    start_epoch = initial_step // len(train_dataloader)
+    start_epoch = (initial_step // len(train_dataloader)) // train_args.batch_size
     dev_losses = compute_dev_lm_loss(dev_args, dev_dataloader, model)
     dev_jga = max_dev_jga
     for subset, value in dev_losses.items():
@@ -274,7 +275,7 @@ def optimize_model(
             writer.add_scalar(
                 f"Loss/{subset}", value, global_step=n_batches * train_args.batch_size
             )
-    logger.info(f"Start training at global step {n_batches}!")
+    logger.info(f"Start training at global step {n_batches}, epoch {start_epoch}!")
     stop_training = False
     for epoch in range(start_epoch, train_args.epochs):
         # Initialise for each epoch
@@ -683,8 +684,9 @@ def main(
                 optimizer, num_warmup_steps=args.train.warmup_steps
             )
     if ckpt_path is not None:
+        step = int(ckpt_path.name.split(".")[-1])
         assert (
-            ckpt_path.name == "model.last"
+            step % args.dev.eval_interval != 0
         ), "For reproducibility, load model saved at the end of the epoch"
         optimizer, scheduler, metrics, initial_step = load_optimizer_scheduler(
             ckpt_path, optimizer, scheduler
