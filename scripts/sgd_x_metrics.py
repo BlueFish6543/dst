@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -116,6 +117,13 @@ def get_metric_sensitivity(scores: np.ndarray) -> float:
     is_flag=True,
     default=False,
 )
+@click.option(
+    "-o",
+    "--original",
+    "original",
+    is_flag=True,
+    default=False,
+)
 def main(
     schema_variants: tuple[str],
     hyps_source_dir: str,
@@ -123,8 +131,10 @@ def main(
     models: tuple[str],
     metric: str,
     average_across_models: bool,
+    original: bool,
 ):
-
+    if original:
+        schema_variants = ("original",)
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         level=logging.INFO,
@@ -202,7 +212,12 @@ def main(
                                 this_step_idx_all_scores.append(
                                     frame["metrics"][metric]
                                 )
-                                if frame["service"][:-1] in in_domain_services:
+                                service_name = (
+                                    frame["service"]
+                                    if original
+                                    else frame["service"][:-1]
+                                )
+                                if service_name in in_domain_services:
                                     this_step_idx_seen_scores.append(
                                         frame["metrics"][metric]
                                     )
@@ -333,6 +348,8 @@ def main(
         aggregate_values(jga_across_models, "mean")
         logger.info(default_to_regular(jga_across_models))
 
+    if original:
+        sys.exit()
     # calculate SS
     ss_across_models = nested_defaultdict(list, depth=2)
     all_ss = nested_defaultdict(list, depth=2)
