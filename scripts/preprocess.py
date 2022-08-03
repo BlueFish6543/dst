@@ -7,15 +7,17 @@ import random
 import re
 import string
 import sys
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import click
 from omegaconf import DictConfig, OmegaConf
 
+from dst.dataset import postprocess_description, preprocess_element_name
 from dst.metadata.prepocessing import (
     ALPHA_NUMERIC_SLOT_EXCEPTIONS,
     CATEGORICALS_WITH_DONTCARE_VALUE,
 )
+from dst.processing_utils import load_turn_examples
 from dst.utils import get_datetime, infer_schema_variant_from_path, save_data, set_seed
 
 logger = logging.getLogger(__name__)
@@ -246,19 +248,77 @@ def allows_dontcare_value(slot_dict: dict, service: str) -> bool:
     )
 
 
+def format_description(
+    service_name: str,
+    element_schema: str,
+    description_config: DictConfig,
+    description_turns: Optional[
+        dict[str, Union[list[dict], dict[str, list[dict]]]]
+    ] = None,
+) -> str:
+    if description_config is None:
+        return element_schema["description"]
+    components = description_config.components
+    separators = description_config.component_separators
+    randomize = description_config.randomize_component_order
+
+    this_elem_description = []
+    description = element_schema["description"]
+    for comp in components:
+        if comp == "schema":
+            this_elem_description.append(description)
+        elif comp == "turn":
+            if description_turns is None:
+                continue
+            if isinstance(description_turns[description], dict):
+                enriching_turns = description_turns[description][service_name]
+                enriching_turns = [p["surface_form"] for p in enriching_turns]
+            else:
+                enriching_turns = [
+                    p["surface_form"] for p in description_turns[description]
+                ]
+            if len(set(enriching_turns)) == 1 and (description == enriching_turns[0]):
+                continue
+            turn_chosen = random.choice(enriching_turns)
+            turn_chosen = postprocess_description(
+                turn_chosen, description_config.excluded_end_punctuation
+            )
+            this_elem_description.append(turn_chosen)
+        elif comp == "slot":
+            this_elem_description.append(
+                preprocess_element_name(element_schema["name"])
+            )
+        else:
+            logger.warning(f"Unknown description component type: {comp}")
+    if randomize:
+        random.shuffle(this_elem_description)
+    description = ""
+    for sep, desc_comp in zip(separators, this_elem_description):
+        description += f"{sep}{desc_comp}"
+    description.strip()
+    while description[-1] in separators:
+        description = description[:-1]
+    while description[0] in separators:
+        description = description[1:]
+    return description
+
+
 def linearize_description(
     schema: List[dict],
     turn: dict,
     prefix_separators: DictConfig,
     lowercase: bool = False,
     dontcare_handling: str = "qa_option",
+    description_config: Optional[DictConfig] = None,
+    description_turns: Optional[dict] = None,
 ) -> dict:
-    services = list(sorted([frame["service"] for frame in turn["frames"]]))
+
+    this_frame_services = list(sorted([frame["service"] for frame in turn["frames"]]))
     ordered_services = [s["service_name"] for s in schema]
     assert ordered_services == sorted(ordered_services)
     result = {}
     for service in schema:
-        if service["service_name"] == services[0]:
+        if service["service_name"] == this_frame_services[0]:
             service_name = service["service_name"]
             description = ""
             slot_mapping = {}  # maps slot names to indices and indices to slot names
@@ -268,10 +328,13 @@ def linearize_description(
             )  # maps intent names to indices and indices to intent names
 
             random.shuffle(service["slots"])
-            for i, slot in enumerate(service["slots"]):
-                slot_name = slot["name"]
-                slot_description = slot["description"]
-                if slot["is_categorical"]:
+            for i, slot_schema in enumerate(service["slots"]):
+                slot_name = slot_schema["name"]
+                slot_description = format_description(
+                    service_name, slot_schema, description_config, description_turns
+                )
+                categorical_slot = slot_schema["is_categorical"]
+                if categorical_slot:
                     separator = prefix_separators.categorical_slots
                 else:
                     separator = prefix_separators.noncategorical_slots
@@ -279,28 +342,30 @@ def linearize_description(
                 slot_mapping[slot_name] = i
                 slot_mapping[i] = slot_name
 
-                if slot["is_categorical"]:
+                if categorical_slot:
                     # append dontcare to descriptions of categorical slots if this value is possible
                     cat_values_mapping[slot_name] = {}  # value to index
-                    random.shuffle(slot["possible_values"])
+                    random.shuffle(slot_schema["possible_values"])
                     if dontcare_handling == "qa_option" and allows_dontcare_value(
-                        slot, service_name
+                        slot_schema, service_name
                     ):
-                        slot["possible_values"].append("dontcare")
-                        random.shuffle(slot["possible_values"])
-                    assert len(slot["possible_values"]) == len(
-                        set(slot["possible_values"])
+                        slot_schema["possible_values"].append("dontcare")
+                        random.shuffle(slot_schema["possible_values"])
+                    assert len(slot_schema["possible_values"]) == len(
+                        set(slot_schema["possible_values"])
                     )
                     for index_letter, value in zip(
-                        list(string.ascii_lowercase), slot["possible_values"]
+                        list(string.ascii_lowercase), slot_schema["possible_values"]
                     ):
                         description += f"{i}{index_letter}) {value} "
                         cat_values_mapping[slot_name][value] = f"{i}{index_letter}"
 
             random.shuffle(service["intents"])
-            for i, intent in enumerate(service["intents"], 1):
-                intent_name = intent["name"]
-                intent_description = intent["description"]
+            for i, intent_schema in enumerate(service["intents"], 1):
+                intent_name = intent_schema["name"]
+                intent_description = format_description(
+                    service_name, intent_schema, description_config, description_turns
+                )
                 description += f"i{i}{prefix_separators.intents}{intent_description} "
                 intent_mapping[intent_name] = f"i{i}"
                 intent_mapping[f"i{i}"] = intent_name
@@ -313,18 +378,19 @@ def linearize_description(
                 "cat_values_mapping": cat_values_mapping,
                 "intent_mapping": intent_mapping,
             }
-            services.pop(0)
-            if not services:
+            this_frame_services.pop(0)
+            if not this_frame_services:
                 break
     return result
 
 
-def process_file(
+def preprocess_shard(
     schema: List[dict],
     raw_dialogues: list,
     config: DictConfig,
     downsample_factor: int = 1,
     downsample_mode="dialogue",
+    description_turns: Optional[dict] = None,
 ) -> dict:
     result = {}
     lowercase_model_inputs = config.lowercase_model_inputs
@@ -357,6 +423,10 @@ def process_file(
                     config.prefix_separators,
                     lowercase=lowercase_model_inputs,
                     dontcare_handling=config.dontcare_handling,
+                    description_config=config.descriptions
+                    if hasattr(config, "descriptions")
+                    else None,
+                    description_turns=description_turns,
                 )
                 user_utterance = turn["utterance"]
                 for frame in turn["frames"]:
@@ -457,7 +527,8 @@ def main(
     config.metadata.output_path = output_path
     output_path = pathlib.Path(output_path)
     data_paths = [pathlib.Path(p) for p in data_paths]
-
+    preproc_confing = config.preprocessing
+    preproc_confing.descriptions.split = split
     try:
         downsample_factor = config.downsample_factor
     except AttributeError:
@@ -473,6 +544,7 @@ def main(
     for shard_path in data_paths:
         logger.info(f"Preprocessing split {split}, shard {shard_path}")
         this_shard_data_dir = shard_path.joinpath(split)
+        this_shard_schema_path = this_shard_data_dir.joinpath("schema.json")
         schema_variant = infer_schema_variant_from_path(str(this_shard_data_dir))
         logger.info(f"Inferred schema variant: {schema_variant}")
         config.metadata.schema_variant = schema_variant
@@ -481,25 +553,33 @@ def main(
                 shard_path.joinpath(f"{split}_generator_config.yaml")
             )
             config.metadata.generator = gen_config
-        with open(this_shard_data_dir.joinpath("schema.json"), "r") as f:
+        with open(this_shard_schema_path, "r") as f:
             schema = json.load(f)
-        pattern = re.compile(r"dialogues_[0-9]+\.json")
-        result = {}
-        for file in this_shard_data_dir.iterdir():
-            if pattern.match(file.name):
-                with open(file, "r") as f:
-                    raw_dialogues = json.load(f)
-                result.update(
-                    process_file(
-                        schema,
-                        raw_dialogues,
-                        config.preprocessing,
-                        downsample_factor=downsample_factor,
-                        downsample_mode=downsample_mode,
-                    )
+        description_turns = load_turn_examples(
+            this_shard_data_dir, schema, config, split
+        )
+        pattern = re.compile(r"dialogues_\d+\.json")
+        processed_dialogues = {}
+        all_files = sorted(
+            [f for f in this_shard_data_dir.iterdir() if pattern.match(f.name)],
+            key=lambda x: int(x.name.replace(".json", "").split("_")[1]),
+        )
+        for file in all_files:
+            logger.info(f"Preprocessing file: {file}")
+            with open(file, "r") as f:
+                raw_dialogues = json.load(f)
+            processed_dialogues.update(
+                preprocess_shard(
+                    schema,
+                    raw_dialogues,
+                    preproc_confing,
+                    downsample_factor=downsample_factor,
+                    downsample_mode=downsample_mode,
+                    description_turns=description_turns,
                 )
+            )
         save_data(
-            result,
+            processed_dialogues,
             output_path.joinpath(schema_variant, split),
             metadata=config,
             version=version,
