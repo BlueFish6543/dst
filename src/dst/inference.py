@@ -10,7 +10,7 @@ import torch
 from omegaconf import DictConfig, ListConfig
 from tqdm import tqdm
 
-from dst.utils import (
+from dst.sgd_utils import (
     infer_data_version_from_path,
     infer_schema_variant_from_path,
     infer_split_name_from_path,
