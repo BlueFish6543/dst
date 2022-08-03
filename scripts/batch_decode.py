@@ -132,12 +132,31 @@ def decode_checkpoint(
     "--override", is_flag=True, default=False, help="Override previous results."
 )
 @click.option(
+    "-compat",
+    "--compatible_versions",
+    "compatible_versions",
+    required=True,
+    type=int,
+    help="Specify which test data versions are compatible with ",
+    multiple=True,
+)
+@click.option(
     "-s",
     "--orig_train_schema_path",
     "orig_train_schema_path",
     required=True,
     type=click.Path(exists=True, path_type=Path),
     help="Absolute original train schema path. Used to determine seen/unseen examples",
+)
+@click.option(
+    "-scheme",
+    "--ensemble_dirs",
+    "ensemble_dirs",
+    required=False,
+    type=str,
+    default="",
+    help="Used when inference with the same model is performed with different inputs, to avoid overwriting "
+    "inference results.",
 )
 @click.option("--dev_small", "split", flag_value="dev_small")
 @click.option("--dev", "split", flag_value="dev")
@@ -152,7 +171,9 @@ def main(
     freq: int,
     reverse: bool,
     override: bool,
+    compatible_versions: tuple[int],
     orig_train_schema_path: pathlib.Path,
+    decoding_scheme: str,
     split: str,
 ):
     args = OmegaConf.load(args_path)
@@ -175,6 +196,7 @@ def main(
     try:
         hyp_path = hyp_dir.joinpath(
             experiment,
+            decoding_scheme,
             schema_variant_identifier,
             split,
             data_version,
@@ -187,6 +209,7 @@ def main(
             )
         hyp_path = Path(args.hyp_dir).joinpath(
             experiment,
+            decoding_scheme,
             schema_variant_identifier,
             split,
             data_version,
@@ -261,14 +284,24 @@ def main(
             config_data_version,
             test_data_version,
         ]
-        if len(set(data_versions)) != 1:
-            logger.error(
-                f"Test data version: {test_data_version}. "
-                f"Checkpoint version: {config_data_version}. "
-                f"Checkpoint version inferred from path: {inferred_checkpoint_data_version}."
-                f"Decoding aborted!"
-            )
-            raise ValueError("Incorrect data version!")
+        try:
+            assert len(set(data_versions)) == 1
+        except AssertionError:
+            if (
+                inferred_checkpoint_data_version not in compatible_versions
+                and test_data_version not in compatible_versions
+            ):
+                logger.error(
+                    f"Test data version: {test_data_version}. "
+                    f"Checkpoint version: {config_data_version}. "
+                    f"Checkpoint version inferred from path: {inferred_checkpoint_data_version}."
+                    f"Decoding aborted!"
+                )
+                raise ValueError("Incorrect data version!")
+            else:
+                logger.warning(
+                    f"Decoding on compatible version {test_data_version}. Model was trained on {config_data_version}"
+                )
         belief_states = decode_checkpoint(args, checkpoint, hyp_path)
         if belief_states:
             decode_config = OmegaConf.create()
