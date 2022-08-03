@@ -220,7 +220,7 @@ def file_iterator(
 def split_iterator(
     split: Literal["train", "dev", "test"],
     return_only: Optional[set[str]] = None,
-    data_pckg_or_path: str = "data.raw",
+    data_pckg_or_path: str = _DATA_PACKAGE,
 ) -> Generator[tuple[pathlib.Path, dict]]:
     """
 
