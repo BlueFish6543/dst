@@ -14,16 +14,14 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, SequentialSampler
 from tqdm import tqdm
 
-from src.dst.dataset import (
-    TestDataset
-)
-from src.dst.utils import (
-    load_model,
-    set_seed,
+from dst.sgd_utils import (
+    infer_data_version_from_path,
     infer_schema_variant_from_path,
     load_schema,
-    infer_data_version_from_path, get_datetime,
 )
+from src.dst.dataset import TestDataset
+from src.dst.utils import get_datetime, load_model, set_seed
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
 
@@ -36,23 +34,19 @@ def sequential_generation(args, batch, model, tokenizer):
         return mask
 
     def _truncate_past_key_values(
-            past_key_values: tuple[tuple[torch.Tensor]],
-            max_len: int = 1024
+        past_key_values: tuple[tuple[torch.Tensor]], max_len: int = 1024
     ):
         truncated_key_values = []
         for key, values in past_key_values:
             truncated_key_values.append(
-                (
-                    key[..., -(max_len - 1):, :],
-                    values[..., -(max_len - 1):, :]
-                )
+                (key[..., -(max_len - 1) :, :], values[..., -(max_len - 1) :, :])
             )
         return tuple(truncated_key_values)
 
     eos_id = tokenizer.eos_token_id
     max_seq_len = args.max_seq_len
-    input_ids = batch['input_ids'].to(DEVICE)
-    attention_mask = batch['attention_mask'].to(DEVICE)
+    input_ids = batch["input_ids"].to(DEVICE)
+    attention_mask = batch["attention_mask"].to(DEVICE)
     batch_size = input_ids.size(0)
     assert batch_size == 1
     past_key_values = None
@@ -68,7 +62,7 @@ def sequential_generation(args, batch, model, tokenizer):
             attention_mask=attention_mask,
             past_key_values=past_key_values,
             use_cache=True,
-            return_dict=False
+            return_dict=False,
         )
 
         # logits: (B, T, V), T = 1 when past is passed
@@ -76,7 +70,9 @@ def sequential_generation(args, batch, model, tokenizer):
         next_token = torch.argmax(next_token_logits, dim=-1)
         if input_ids[0][0].item() == tokenizer.bos_token_id:
             logger.warning(
-                "{}: Truncated entire context, decoding will be aborted...".format(batch["example_id"][0])
+                "{}: Truncated entire context, decoding will be aborted...".format(
+                    batch["example_id"][0]
+                )
             )
             break
         if i != 0 and next_token[0].item() == input_ids[0][-1].item():
@@ -89,10 +85,18 @@ def sequential_generation(args, batch, model, tokenizer):
             attention_mask = _extend_mask(attention_mask)
         else:
             if not warning_emitted:
-                logger.warning("{} exceeds maximum sequence length, truncating...".format(batch["example_id"][0]))
+                logger.warning(
+                    "{} exceeds maximum sequence length, truncating...".format(
+                        batch["example_id"][0]
+                    )
+                )
                 warning_emitted = True
-            input_ids = torch.cat([input_ids[:, -(max_seq_len - 1):], next_token.unsqueeze(-1)], dim=1)
-            past_key_values = _truncate_past_key_values(past_key_values, max_len=max_seq_len)
+            input_ids = torch.cat(
+                [input_ids[:, -(max_seq_len - 1) :], next_token.unsqueeze(-1)], dim=1
+            )
+            past_key_values = _truncate_past_key_values(
+                past_key_values, max_len=max_seq_len
+            )
         if next_token[0].item() == eos_id:
             break
         if repeat_token_count == args.repeat_token_tolerance:
@@ -106,11 +110,11 @@ def sequential_generation(args, batch, model, tokenizer):
 
 
 def decode(args, batch, model, tokenizer):
-    input_ids = batch['input_ids']
+    input_ids = batch["input_ids"]
     batch_size, ctx_len = input_ids.size()
     assert batch_size == 1
     try:
-        if args.generate_api == 'huggingface':
+        if args.generate_api == "huggingface":
             output = model.generate(
                 input_ids.to(DEVICE),
                 max_length=args.decoder_max_seq_len,
@@ -123,7 +127,7 @@ def decode(args, batch, model, tokenizer):
                 pad_token_id=tokenizer.pad_token_id,
                 early_stopping=True,
             )
-        elif args.generate_api == 'custom':
+        elif args.generate_api == "custom":
             output = sequential_generation(args, batch, model, tokenizer)
         else:
             raise ValueError(
@@ -141,37 +145,40 @@ def decode(args, batch, model, tokenizer):
 
 def test(args, tokenizer, model):
     train_schema = load_schema(args.orig_train_schema_path)
-    dataset = TestDataset(args, tokenizer, args.dst_test_path, args.data_size, train_schema)
+    dataset = TestDataset(
+        args, tokenizer, args.dst_test_path, args.data_size, train_schema
+    )
     sampler = SequentialSampler(dataset)
     test_gen_dataloader = DataLoader(
-        dataset,
-        sampler=sampler,
-        batch_size=1,
-        collate_fn=dataset.collate_fn
+        dataset, sampler=sampler, batch_size=1, collate_fn=dataset.collate_fn
     )
     model.eval()
     collector = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    description = f'Decoding {len(dataset)} examples from split {dataset.split}. ' \
-                  f'Schema variants: {dataset.schema_variants}'
+    description = (
+        f"Decoding {len(dataset)} examples from split {dataset.split}. "
+        f"Schema variants: {dataset.schema_variants}"
+    )
     with torch.no_grad():
         iterator = enumerate(
-            tqdm(test_gen_dataloader, desc=description, disable=args.verbose.disable_display)
+            tqdm(
+                test_gen_dataloader,
+                desc=description,
+                disable=args.verbose.disable_display,
+            )
         )
         for step, batch in iterator:
-            schema_variant, dial_turn = batch['example_id'][0].split("_", 1)
+            schema_variant, dial_turn = batch["example_id"][0].split("_", 1)
             dialogue_id, turn_idx = dial_turn.rsplit("_", 1)
             bs_pred_str = decode(args, batch, model, tokenizer)
-            usr_utterance = batch['user_utterance'][0]
-            service = batch['service'][0]
+            usr_utterance = batch["user_utterance"][0]
+            service = batch["service"][0]
             collector[dialogue_id][turn_idx]["utterance"] = usr_utterance
             collector[dialogue_id][turn_idx][service]["predicted_str"] = bs_pred_str
     return dict(collector)
 
 
 def decode_checkpoint(
-        args,
-        ckpt_path: pathlib.Path,
-        hyp_path: pathlib.Path
+    args, ckpt_path: pathlib.Path, hyp_path: pathlib.Path
 ) -> Optional[dict]:
     """Runs decoding for a single checkpoint.
 
@@ -203,7 +210,9 @@ def decode_checkpoint(
             logger.warning(f"Overriding predictions for {this_ckpt_hyp_path}")
     else:
         this_ckpt_hyp_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Decoding {str(ckpt_path)}. Saving dialogues and belief states to {hyp_path}")
+    logger.info(
+        f"Decoding {str(ckpt_path)}. Saving dialogues and belief states to {hyp_path}"
+    )
     _, tokenizer, model = load_model(args, device=DEVICE)
     belief_states = test(args, tokenizer, model)
     with open(this_ckpt_hyp_path.joinpath("belief_states.json"), "w") as f:
@@ -237,7 +246,7 @@ def decode_checkpoint(
     "checkpoint",
     type=click.Path(path_type=Path),
     help="Optional. Absolute path to checkpoint. Overrides option under args.decode.checkpoint, at least one must be "
-         "specified. See also --all flag.",
+    "specified. See also --all flag.",
 )
 @click.option(
     "-hyp",
@@ -245,27 +254,24 @@ def decode_checkpoint(
     "hyp_dir",
     type=click.Path(path_type=Path),
     help="Dir where hypothesis files are to be saved. "
-         "Auto-suffixed with args.decode.experiment_name model checkpoint binary name.",
+    "Auto-suffixed with args.decode.experiment_name model checkpoint binary name.",
 )
 @click.option(
-    '--all',
+    "--all",
     is_flag=True,
     default=False,
-    help="Decode all checkpoints in a folder. -c/--checkpoint must be the dir where all checkpoint folders are stored."
+    help="Decode all checkpoints in a folder. -c/--checkpoint must be the dir where all checkpoint folders are stored.",
 )
 @click.option(
-    '--override',
-    is_flag=True,
-    default=False,
-    help="Override previous results."
+    "--override", is_flag=True, default=False, help="Override previous results."
 )
 @click.option(
-    '-f',
-    '--decode-freq',
-    'freq',
+    "-f",
+    "--decode-freq",
+    "freq",
     type=int,
     default=1,
-    help="Subsample the checkpoints to speed up task-oriented evaluation as training progresses."
+    help="Subsample the checkpoints to speed up task-oriented evaluation as training progresses.",
 )
 @click.option(
     "-s",
@@ -275,20 +281,20 @@ def decode_checkpoint(
     type=click.Path(exists=True, path_type=Path),
     help="Absolute original train schema path. Used to determine seen/unseen examples",
 )
-@click.option('--dev_small', 'split', flag_value='dev_small')
-@click.option('--dev', 'split', flag_value='dev')
-@click.option('--test', 'split', flag_value='test')
+@click.option("--dev_small", "split", flag_value="dev_small")
+@click.option("--dev", "split", flag_value="dev")
+@click.option("--test", "split", flag_value="test")
 def main(
-        args_path: pathlib.Path,
-        test_path: pathlib.Path,
-        checkpoint: pathlib.Path,
-        hyp_dir: pathlib.Path,
-        log_level: int,
-        all: bool,
-        override: bool,
-        freq: int,
-        orig_train_schema_path: pathlib.Path,
-        split: str,
+    args_path: pathlib.Path,
+    test_path: pathlib.Path,
+    checkpoint: pathlib.Path,
+    hyp_dir: pathlib.Path,
+    log_level: int,
+    all: bool,
+    override: bool,
+    freq: int,
+    orig_train_schema_path: pathlib.Path,
+    split: str,
 ):
     args = OmegaConf.load(args_path)
     set_seed(args.reproduce)
@@ -329,9 +335,9 @@ def main(
         logging.StreamHandler(sys.stdout),
         logging.StreamHandler(sys.stderr),
         logging.FileHandler(
-            f'{hyp_path.joinpath(Path(__file__).stem)}.log',
-            mode='w' if not all else 'a',
-        )
+            f"{hyp_path.joinpath(Path(__file__).stem)}.log",
+            mode="w" if not all else "a",
+        ),
     ]
     logging.basicConfig(
         handlers=handlers,
@@ -347,20 +353,29 @@ def main(
     all_checkpoints = []
     if all:
         if not checkpoint or not checkpoint.exists():
-            raise ValueError("Please provide absolute path to the checkpoints directory!")
+            raise ValueError(
+                "Please provide absolute path to the checkpoints directory!"
+            )
         else:
             all_checkpoints = [
-                f for f in checkpoint.glob("model*") if
-                'yaml' not in str(f) and 'log' not in str(f)
+                f
+                for f in checkpoint.glob("model*")
+                if "yaml" not in str(f) and "log" not in str(f)
             ]
             # decode later checkpoints first
-            all_checkpoints.sort(key=lambda x: int(str(x).split(".")[-1]), reverse=False)
+            all_checkpoints.sort(
+                key=lambda x: int(str(x).split(".")[-1]), reverse=False
+            )
             if args.decode_steps:
-                all_checkpoints_steps = [int(str(el).split(".")[-1]) for el in all_checkpoints]
+                all_checkpoints_steps = [
+                    int(str(el).split(".")[-1]) for el in all_checkpoints
+                ]
                 filtered_checkpoints = []
                 for step in args.decode_steps:
                     try:
-                        filtered_checkpoints.append(all_checkpoints[all_checkpoints_steps.index(step)])
+                        filtered_checkpoints.append(
+                            all_checkpoints[all_checkpoints_steps.index(step)]
+                        )
                     except ValueError:
                         logger.warning(
                             f"Decoding step {step} specified in configuration file but corresponding checkpoint "
@@ -372,7 +387,9 @@ def main(
     else:
         try:
             if checkpoint.exists():
-                assert 'model.' in checkpoint.name, "Path to model checkpoint should end in /model.*/"
+                assert (
+                    "model." in checkpoint.name
+                ), "Path to model checkpoint should end in /model.*/"
                 all_checkpoints = [checkpoint]
         except AttributeError:
             if not args.checkpoint:
@@ -385,7 +402,9 @@ def main(
                 )
             else:
                 checkpoint = Path(args.checkpoint)
-                assert 'model.' in checkpoint.name, "Path to model checkpoint should end in /model.*/"
+                assert (
+                    "model." in checkpoint.name
+                ), "Path to model checkpoint should end in /model.*/"
                 all_checkpoints = [checkpoint]
     logger.info(f"Decoding {len(all_checkpoints)} checkpoints")
     # Decode checkpoints sequentially
@@ -394,8 +413,14 @@ def main(
         model_config = OmegaConf.load(checkpoint.parent.joinpath("model_config.yaml"))
         config_data_version = model_config.data.version
         inferred_checkpoint_data_version = infer_data_version_from_path(str(checkpoint))
-        inferred_checkpoint_data_version = int(inferred_checkpoint_data_version.split("_")[1])
-        data_versions = [inferred_checkpoint_data_version, config_data_version, test_data_version]
+        inferred_checkpoint_data_version = int(
+            inferred_checkpoint_data_version.split("_")[1]
+        )
+        data_versions = [
+            inferred_checkpoint_data_version,
+            config_data_version,
+            test_data_version,
+        ]
         if len(set(data_versions)) != 1:
             logger.error(
                 f"Test data version: {test_data_version}. "
@@ -411,10 +436,10 @@ def main(
             decode_config.date = get_datetime()
             OmegaConf.save(
                 OmegaConf.merge(decode_config, model_config),
-                f=hyp_path.joinpath(checkpoint.name, "experiment_config.yaml")
+                f=hyp_path.joinpath(checkpoint.name, "experiment_config.yaml"),
             )
-    logger.info('Done decoding!')
+    logger.info("Done decoding!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
