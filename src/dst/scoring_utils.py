@@ -51,7 +51,7 @@ def get_service_set(schema_path):
     return service_set
 
 
-def get_in_domain_services(schema_path_1, schema_path_2):
+def get_in_domain_services(schema_path_1: str, schema_path_2: str) -> set[str]:
     """Get the set of common services between two schemas."""
     return get_service_set(schema_path_1) & get_service_set(schema_path_2)
 
@@ -86,11 +86,7 @@ def setup_evaluator_inputs(
         else None,
     )
     eval_schema_path = inference_config.ref_schema_path
-    with open(eval_schema_path, "r") as f:
-        eval_services = {}
-        list_services = json.load(f)
-        for service in list_services:
-            eval_services[service["service_name"]] = service
+    eval_services = get_eval_services(eval_schema_path)
     in_domain_services = get_in_domain_services(
         eval_schema_path,
         inference_config.orig_train_schema_path,
@@ -102,3 +98,13 @@ def setup_evaluator_inputs(
         "dataset_hyp": hyps_refs["dataset_hyp"],
         "dataset_ref": hyps_refs["dataset_ref"],
     }
+
+
+def get_eval_services(eval_schema_path: str) -> dict[str, dict]:
+    """Create a mapping from service name to service schema."""
+    with open(eval_schema_path, "r") as f:
+        eval_services = {}
+        list_services = json.load(f)
+        for service in list_services:
+            eval_services[service["service_name"]] = service
+    return eval_services
