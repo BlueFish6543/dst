@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import pathlib
+import re
 import sys
 import time
 from pathlib import Path
@@ -36,12 +37,12 @@ from dst.evaluation import get_metrics, log_metrics_to_tb, save_metrics
 from dst.inference import run_inference, setup_inference_config
 from dst.parser import parse, setup_parser
 from dst.scoring_utils import setup_evaluator_inputs
+from dst.sgd_utils import get_data_version, load_schema
 from dst.utils import (
-    get_data_version,
+    cleanup_files,
     get_datetime,
     load_model,
     load_optimizer_scheduler,
-    load_schema,
     save_checkpoint,
     set_seed,
 )
@@ -134,8 +135,13 @@ def compute_task_oriented_metrics(
     tokenizer: T5Tokenizer,
     inference_config: DictConfig,
     inference_data_loader: BatchedTestDataset,
+    save_dialogue_files: bool = False,
 ) -> dict:
-    """Compute the SGD metrics for the current model."""
+    """Compute the SGD metrics for the current model.
+
+    Args:
+        save_dialogue_files:
+    """
 
     this_ckpt_hyp_path = Path(inference_config.hyp_dir).joinpath(
         f"model.{str(global_step)}"
@@ -202,6 +208,8 @@ def compute_task_oriented_metrics(
             evaluator_inputs,
             all_metrics_aggregate,
         )
+        if not save_dialogue_files:
+            cleanup_files(this_ckpt_hyp_path, re.compile(r"dialogues_\d+\.json"))
         torch.cuda.empty_cache()
         return all_metrics_aggregate
 
@@ -319,6 +327,7 @@ def optimize_model(
                     tokenizer,
                     inference_config,
                     inference_data_loader,
+                    inference_config.save_dialogue_files,
                 )
                 log_metrics_to_tb(
                     n_batches * train_args.batch_size, writer, task_oriented_metrics
@@ -470,7 +479,9 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     "orig_train_schema_path",
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Absolute original train schema path. Used to determine seen/unseen examples",
+    help="Absolute original train schema path. "
+    "Used to determine seen/unseen examples so that likelihoods "
+    "for the two types of example can be computed separately",
 )
 @click.option(
     "-d",
@@ -522,7 +533,7 @@ def set_model(args: DictConfig, data_parallel: bool = False):
     "--template_dir",
     "template_dir",
     type=click.Path(exists=True, path_type=Path),
-    help="Absolute to the directory containing blank dialogue files for the dev set.",
+    help="Absolute path to the directory containing blank dialogue files for the dev set.",
 )
 # necessary for scoring
 @click.option(
