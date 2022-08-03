@@ -17,7 +17,7 @@ from dst.metadata.parser import (
     lower_to_schema_case,
     time_slots,
 )
-from dst.utils import Schema
+from dst.sgd_utils import Schema
 
 logger = logging.getLogger(__name__)
 
@@ -1043,7 +1043,7 @@ def parse(
 
     if not output_dir.exists():
         output_dir.mkdir(exist_ok=True, parents=True)
-    pattern = re.compile(r"dialogues_[0-9]+\.json")
+    pattern = re.compile(r"dialogues_\d+\.json")
     for file in output_dir.iterdir():
         if pattern.match(file.name):
             if files_to_parse is not None and file.name not in files_to_parse:
@@ -1051,9 +1051,9 @@ def parse(
             logger.info(f"Parsing file {file}.")
             with open(file, "r") as f:
                 dialogue_templates = json.load(f)
-            for blank_dialogue in dialogue_templates:
+            for template_dialogue in dialogue_templates:
                 global dialogue_id
-                dialogue_id = blank_dialogue["dialogue_id"]
+                dialogue_id = template_dialogue["dialogue_id"]
                 logger.info(f"Parsing dialogue {dialogue_id}")
                 try:
                     predicted_data = predictions[dialogue_id]
@@ -1068,7 +1068,7 @@ def parse(
                     continue
                 populate_dialogue_state(
                     predicted_data,
-                    blank_dialogue,
+                    template_dialogue,
                     schema,
                     preprocessed_references[dialogue_id],
                     value_separator=value_separator,
@@ -1088,7 +1088,20 @@ def setup_parser(
     templates_dir: str,
     belief_states_path: str,
 ) -> dict:
-    """Helper function that helps setup parsing so that it can be ran at training time."""
+    """Helper function that helps setup parsing so that it can be run at training time.
+
+    Parameters
+    ----------
+    schema_path
+        Path to the schema of the split for which predictions are to be parsed.
+    preprocessed_reference_dir
+        Path to the directory containing the pre-processed references.
+    templates_dir
+        Path to the directory containing SGD dialogues without annotations ("templates")
+        for the split for which predictions are to be parsed.
+    belief_states_path:
+        Path to the directory containing the raw model predictions.
+    """
 
     copy_tree(templates_dir, belief_states_path)
     schema_path = pathlib.Path(schema_path)
