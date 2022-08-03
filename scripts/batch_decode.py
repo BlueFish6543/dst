@@ -13,13 +13,8 @@ from omegaconf import OmegaConf
 
 from dst.dataset import get_inference_data_loader
 from dst.inference import run_inference
-from dst.utils import (
-    get_datetime,
-    infer_data_version_from_path,
-    infer_schema_variant_from_path,
-    load_model,
-    set_seed,
-)
+from dst.sgd_utils import infer_data_version_from_path, infer_schema_variant_from_path
+from dst.utils import get_datetime, load_model, set_seed
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
