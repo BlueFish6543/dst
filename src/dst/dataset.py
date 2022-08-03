@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, SequentialSampler
 from tqdm import tqdm
 
-from dst.utils import (
+from dst.sgd_utils import (
     PathMapping,
     Schema,
     infer_schema_variant_from_path,
@@ -273,15 +273,15 @@ class TrainDataset(DSTDataset):
             with open(shard_path, "r") as f:
                 this_shard_data = json.load(f)
             shuffled_keys = list(this_shard_data.keys())
-            random.shuffle(shuffled_keys)
+            # random.shuffle(shuffled_keys)
             for i, dialogue_id in enumerate(shuffled_keys):
                 dialogue = this_shard_data[dialogue_id]
                 if self.data_size != -1 and i > self.data_size:
                     break
                 context = ""
-                for turn_index, turn in enumerate(dialogue):
-                    user_utterance = turn["user_utterance"]
-                    system_utterance = turn["system_utterance"]
+                for turn_pair_idx, turn_pair in enumerate(dialogue):
+                    user_utterance = turn_pair["user_utterance"]
+                    system_utterance = turn_pair["system_utterance"]
                     if not system_utterance:
                         utterance = f"[user] {user_utterance} "
                     else:
@@ -289,7 +289,7 @@ class TrainDataset(DSTDataset):
                             f"[system] {system_utterance} [user] {user_utterance} "
                         )
                     context += utterance
-                    frames = turn["frames"]
+                    frames = turn_pair["frames"]
                     for service in frames:
                         model_input = frames[service]["description"] + " " + context
                         context_ids = self.tokenizer(model_input)["input_ids"]
@@ -303,17 +303,21 @@ class TrainDataset(DSTDataset):
                             schema_variant,
                             service,
                             dialogue_id,
-                            turn_index,
+                            turn_pair_idx,
                         )
 
+        input_over_len_perc = self.encoder_over_length / len(self.examples)
+        output_over_len_perc = self.decoder_over_length / len(self.examples)
         logger.info(
             f"Data statistics: {self.data_paths}: {len(self.examples)} examples"
         )
         logger.info(
-            f"Number of input over-length examples: {self.data_paths}: {self.encoder_over_length} examples"
+            "Number of input over-length examples: "
+            f"{self.data_paths}: {self.encoder_over_length} ({round(input_over_len_perc * 100, 4)} %) examples"
         )
         logger.info(
-            f"Number of output over-length examples: {self.data_paths}: {self.decoder_over_length} examples"
+            f"Number of output over-length examples: "
+            f"{self.data_paths}: {self.decoder_over_length} ({round(output_over_len_perc * 100, 4)} %) examples"
         )
         if self.data_size != -1:
             random.shuffle(self.examples)
@@ -332,6 +336,8 @@ class TrainDataset(DSTDataset):
         input_ids = context_ids
         label_ids = target_ids
         if len(input_ids) > self.max_seq_len:
+            if self.args.discard_overlength:
+                return
             # Handle over-length example
             logger.warning(
                 f"{dialogue_id}({turn_index}) input exceeds maximum sequence length, truncating..."
