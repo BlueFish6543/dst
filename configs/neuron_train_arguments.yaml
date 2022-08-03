@@ -47,6 +47,7 @@ dev:
 
 decode:
   model_name_or_path: 'google/t5-v1_1-base'
+  save_dialogue_files: false
   batch_size: 64
   max_seq_len: 1024 # maximum sequence length of inputs
   data_size: -1 # how many batches of examples to decode
