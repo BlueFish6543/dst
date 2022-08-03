@@ -188,6 +188,7 @@ def save_metrics(
 ):
 
     fpath = metrics_dir.joinpath(f"model_{step}_metrics.json")
+    logging.info(f"Saving aggregate scores at path: {fpath}")
     with open(fpath, "w") as f:
         json.dump(
             all_metrics_aggregate, f, indent=2, separators=(",", ": "), sort_keys=True
