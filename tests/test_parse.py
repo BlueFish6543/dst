@@ -11,7 +11,7 @@ from omegaconf import DictConfig, OmegaConf
 from dst.evaluation import get_metrics
 from dst.parser import parse
 from dst.scoring_utils import get_in_domain_services, load_hyps_and_refs
-from dst.utils import Schema
+from dst.sgd_utils import Schema
 
 logger = logging.getLogger(__name__)
 
