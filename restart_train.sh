@@ -93,6 +93,11 @@ if [ -z ${EXPERIMENT+x} ]; then
   exit
 fi
 
+if [ -z ${STEP+x} ]; then
+  echo "Please specify the step from which you want to restart the experiment by prepending STEP= to the command"
+  exit
+fi
+
 
 #! Full path to application executable:
 application="python -m scripts.train"
@@ -104,7 +109,7 @@ options="-s /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/raw/sgd/train/sche
 -t /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/preprocessed/$AUG_DATA_DIR/v1/train/version_$VERSION/data.json \
 --ref_dir /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/dstc8-schema-guided-dialogue/sgd_x/data/raw/original/dev
 --template_dir /home/$CRS/rds/rds-wjb31-nmt2020/ac2123/d3st/data/interim/blank_dialogue_templates/original/dev
---restore /home/$CRS/rds/rds-wjb31-nmt2020/$CRS/d3st/models/$EXPERIMENT/version_$VERSION/model.last
+--restore /home/$CRS/rds/rds-wjb31-nmt2020/$CRS/d3st/models/$EXPERIMENT/version_$VERSION/model.$STEP
 --do_inference
 --override
 -a configs/$ARGS_REL_PATH -vvv"
