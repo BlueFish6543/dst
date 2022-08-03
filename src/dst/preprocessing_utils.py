@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Generator, Union
+from typing import Generator, Optional, Union
 
 from omegaconf import DictConfig
 
-from dst.data_utils import infer_schema_variant_from_path
+from dst.sgd_utils import infer_schema_variant_from_path
 from dst.utils import load_json, to_json
 
 logger = logging.getLogger(__name__)
@@ -282,3 +283,49 @@ def load_turn_examples(
                     )
                 return descr_paraphrases
     return
+
+
+def is_camel_case(s):
+    return s != s.lower() and s != s.upper() and "_" not in s
+
+
+def _preprocess_intent_name(value: str) -> str:
+    """Splits and intent type into its component words.
+
+    Example
+    -------
+        "FindRestaurant" -> "find restaurant"
+    """
+
+    intent_words = re.findall(r"[A-Z](?:[a-z]+|[A-Z]*(?=[A-Z]|$))", value)
+    return " ".join([w.lower() for w in intent_words])
+
+
+def _preprocess_slot_name(value: str) -> str:
+    """Splits and slot type into its component words.
+
+    Example
+    -------
+        "has_live_music" -> "has live music"
+    """
+    return value.replace("_", " ")
+
+
+def preprocess_element_name(value: str) -> str:
+    """Splits intent- or slot-types to individual words"""
+
+    if is_camel_case(value):
+        return _preprocess_intent_name(value)
+    return _preprocess_slot_name(value)
+
+
+def postprocess_description(
+    description: str, excluded_end_symbols: Optional[list[str]] = None
+) -> str:
+    """Removes the full stop from the end of the description as the schema
+    SGD descriptions are not punctuated."""
+    if excluded_end_symbols is None:
+        return description
+    while description[-1] in excluded_end_symbols:
+        description = description[:-1]
+    return description

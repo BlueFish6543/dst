@@ -12,13 +12,17 @@ from typing import List, Optional, Union
 import click
 from omegaconf import DictConfig, OmegaConf
 
-from dst.dataset import postprocess_description, preprocess_element_name
 from dst.metadata.prepocessing import (
     ALPHA_NUMERIC_SLOT_EXCEPTIONS,
     CATEGORICALS_WITH_DONTCARE_VALUE,
 )
-from dst.processing_utils import load_turn_examples
-from dst.utils import get_datetime, infer_schema_variant_from_path, save_data, set_seed
+from dst.preprocessing_utils import (
+    load_turn_examples,
+    postprocess_description,
+    preprocess_element_name,
+)
+from dst.sgd_utils import infer_schema_variant_from_path
+from dst.utils import get_datetime, save_data, set_seed
 
 logger = logging.getLogger(__name__)
 
