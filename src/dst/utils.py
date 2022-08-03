@@ -12,7 +12,7 @@ from functools import partial
 from itertools import repeat
 from operator import methodcaller
 from pathlib import Path
-from typing import Callable, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -20,16 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 
-try:
-    import importlib_resources
-except (ImportError, ModuleNotFoundError):
-    pass
-
 logger = logging.getLogger(__name__)
-
-_EXPECTED_SCHEMA_VARIANTS = ["v1", "v2", "v3", "v4", "v5"]
-_EXPECTED_SPLITS = ["train", "test", "dev", "dev_small"]
-_DATA_PACKAGE = "data.raw"
 
 
 def set_seed(args):
@@ -114,177 +105,6 @@ def load_optimizer_scheduler(ckpt_path: str, optimizer, scheduler):
     return optimizer, scheduler, metrics, global_step
 
 
-def humanise(name: str, remove_trailing_numbers: bool = False) -> str:
-    # Convert a potentially camel or snake case string to a lower case string delimited by spaces
-    # Adapted from https://stackoverflow.com/a/1176023
-    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
-    name = name.lower().replace("_", " ")
-    if remove_trailing_numbers:
-        # Remove trailing numbers
-        name = re.sub("[0-9]+$", "", name)
-    return re.sub(" +", " ", name).strip()
-
-
-class ServiceSchema(object):
-    """A wrapper for schema for a service. Adapted from `here`_.
-
-
-    .. here
-       https://github.com/google-research/google-research/blob/master/schema_guided_dst/schema.py
-    """
-
-    def __init__(self, schema_json):
-        self._service_name = schema_json["service_name"]
-        self._description = schema_json["description"]
-        self._schema_json = schema_json
-
-        self._intents = sorted(i["name"] for i in schema_json["intents"])
-        self._slots = sorted(s["name"] for s in schema_json["slots"])
-        self._categorical_slots = sorted(
-            s["name"]
-            for s in schema_json["slots"]
-            if s["is_categorical"] and s["name"] in self.state_slots
-        )
-        self._all_categorical_slots = sorted(
-            s["name"] for s in schema_json["slots"] if s["is_categorical"]
-        )
-        self._non_categorical_slots = sorted(
-            s["name"]
-            for s in schema_json["slots"]
-            if not s["is_categorical"] and s["name"] in self.state_slots
-        )
-        slot_schemas = {s["name"]: s for s in schema_json["slots"]}
-        categorical_slot_values = {}
-        for slot in self._categorical_slots:
-            slot_schema = slot_schemas[slot]
-            values = sorted(slot_schema["possible_values"])
-            categorical_slot_values[slot] = values
-        self._categorical_slot_values = categorical_slot_values
-
-    @property
-    def schema_json(self):
-        return self._schema_json
-
-    @property
-    def state_slots(self):
-        """Set of slots which are permitted to be in the dialogue state."""
-        state_slots = set()
-        for intent in self._schema_json["intents"]:
-            state_slots.update(intent["required_slots"])
-            state_slots.update(intent["optional_slots"])
-        return state_slots
-
-    @property
-    def service_name(self):
-        return self._service_name
-
-    @property
-    def description(self):
-        return self._description
-
-    @property
-    def slots(self):
-        return self._slots
-
-    @property
-    def intents(self):
-        return self._intents
-
-    @property
-    def categorical_slots(self):
-        return self._categorical_slots
-
-    @property
-    def all_categorical_slots(self):
-        return self._all_categorical_slots
-
-    @property
-    def non_categorical_slots(self):
-        return self._non_categorical_slots
-
-    def get_categorical_slot_values(self, slot):
-        return self._categorical_slot_values[slot]
-
-
-class Schema(object):
-    """Wrapper for schemas for all services in a dataset. Adapted from the original `Google code_`.
-
-    .. Google code
-       https://github.com/google-research/google-research/blob/master/schema_guided_dst/schema.py
-    """
-
-    def __init__(self, schema_json_path):
-        # Load the schema from the json file.
-        with open(schema_json_path, "r") as f:
-            schemas = json.load(f)
-        self._services = sorted(schema["service_name"] for schema in schemas)
-        service_schemas = {}
-        for schema in schemas:
-            service = schema["service_name"]
-            service_schemas[service] = ServiceSchema(schema)
-        self._service_schemas = service_schemas
-        self._schemas = schemas
-
-    def get_service_schema(self, service):
-        return self._service_schemas[service]
-
-    @property
-    def services(self):
-        return self._services
-
-    @property
-    def service_descriptions(self):
-        return self._service_descriptions
-
-    def save_to_file(self, file_path):
-        with open(file_path, "w") as f:
-            json.dump(self._schemas, f, indent=4)
-
-
-def load_schema(data_path: Union[Path, str]) -> Schema:
-    return Schema(data_path)
-
-
-def infer_schema_variant_from_path(path: str) -> str:
-    """Extracts the schema version from the data path."""
-    match = re.search(r"\bv[1-9]\b", path)  # noqa
-    if match is not None:
-        schema_version = path[match.start() : match.end()]
-        assert schema_version in _EXPECTED_SCHEMA_VARIANTS
-    else:
-        schema_version = "original"
-    return schema_version
-
-
-def get_data_version(path: pathlib.Path) -> int:
-    for elem in path.parts:
-        if "version" in elem:
-            return int(elem.split("_")[-1])
-    return -1
-
-
-def infer_split_name_from_path(path: str) -> str:
-    """Extract the SGD split from the data path."""
-    p = Path(path)
-    if get_data_version(p) == -1:
-        split = p.parent.name
-    else:
-        split = p.parent.parent.name
-    assert split in _EXPECTED_SPLITS
-    return split
-
-
-def infer_data_version_from_path(path: str) -> str:
-    match = re.search(r"\bversion_\d+\b", path)  # noqa
-    if match is not None:
-        version = path[match.start() : match.end()]
-    else:
-        logger.warning(f"Could not detect data version in path {path}")
-        version = ""
-    return version
-
-
 def save_data(
     data: Union[dict, list],
     path: Union[Path, str],
@@ -292,12 +112,7 @@ def save_data(
     version: Optional[int] = None,
     override: bool = False,
 ):
-    """Saves data along with the configuration that created it.
-
-    Args:
-        override:
-        version:
-    """
+    """Saves data along with the configuration that created it."""
     path = Path(path)
     if version is None:
         if path.exists():
@@ -351,7 +166,7 @@ def safeget(dct: dict, *keys: Union[tuple[str], list[str]]):
 
 
 def aggregate_values(
-    mapping: dict, agg_fcn: Literal["mean", "prod"], reduce: bool = True
+    mapping: dict, agg_fcn: Literal["mean", "prod", "sum"], reduce: bool = True
 ):
     """Aggregates the values of the input (nested) mapping according to the
     specified aggregation method. This function modifies the input in place.
@@ -361,7 +176,7 @@ def aggregate_values(
     mapping
         The mapping to be aggregated.
     agg_fcn
-        Aggregation function. Only  `mean` or `prod` aggregation supported.
+        Aggregation function. Only  `mean`, `prod`, 'sum' aggregation is supported.
     reduce
         If False, the aggregator will keep the first dimension of the value to be aggregated.
 
@@ -398,54 +213,6 @@ def default_to_regular(d: defaultdict) -> dict:
     if isinstance(d, defaultdict):
         d = {k: default_to_regular(v) for k, v in d.items()}
     return d
-
-
-class PathMapping:
-
-    split_names = ["train", "dev", "test"]
-
-    def __init__(self, data_pckg_or_path: Union[str, pathlib.Path] = _DATA_PACKAGE):
-        self.pckg = data_pckg_or_path
-        try:
-            self.data_root = importlib_resources.files(data_pckg_or_path)
-        except (ModuleNotFoundError, NameError):
-            if isinstance(data_pckg_or_path, str):
-                self.data_root = pathlib.Path(data_pckg_or_path)
-        self._all_files = [r for r in self.data_root.iterdir()]
-        self.split_paths = self._split_paths()
-        self.schema_paths = self._schema_paths()
-
-    def _split_paths(self):
-        paths = {}
-        for split in PathMapping.split_names:
-            r = [f for f in self._all_files if f.name == split]
-            if not r:
-                continue
-            [paths[split]] = r
-        return paths
-
-    def _schema_paths(self):
-        return {
-            split: self.split_paths[split].joinpath("schema.json")
-            for split in PathMapping.split_names
-            if split in self.split_paths
-        }
-
-    def _get_split_path(self, split: Literal["train", "test", "dev"]) -> pathlib.Path:
-        return self.split_paths[split]
-
-    def _get_schema_path(self, split: Literal["train", "test", "dev"]) -> pathlib.Path:
-        return self.schema_paths[split]
-
-    def __getitem__(self, item):
-        if item in PathMapping.split_names:
-            return self.split_paths[item]
-        else:
-            if item != "schema":
-                raise ValueError(
-                    f"Keys available are schema and {*PathMapping.split_names,}"
-                )
-            return self.schema_paths
 
 
 def nested_defaultdict(default_factory: Callable, depth: int = 1):
@@ -508,3 +275,20 @@ def load_json(path: Path):
     with open(path, "r") as f:
         data = json.load(f)
     return data
+
+
+def to_json(data: Any, path: pathlib.Path, sort_keys: bool = True):
+    """Save data to .json format."""
+
+    Path(path.parent).mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving json file at path: {path}")
+    with open(path, "w") as f:
+        json.dump(data, f, sort_keys=sort_keys, indent=4)
+
+
+def cleanup_files(dir_: pathlib.Path, pattern: re.Pattern):
+    """Remove files matching a given pattern."""
+    for f in dir_.iterdir():
+        if pattern.match(f.name):
+            logger.info(f"Removing file: {f}")
+            os.remove(f)
