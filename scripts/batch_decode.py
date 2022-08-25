@@ -144,9 +144,9 @@ def decode_checkpoint(
     help="Absolute original train schema path. Used to determine seen/unseen examples",
 )
 @click.option(
-    "-scheme",
-    "--ensemble_dirs",
-    "ensemble_dirs",
+    "-prompt",
+    "--prompt_dir",
+    "prompt_type",
     required=False,
     type=str,
     default="",
@@ -168,7 +168,7 @@ def main(
     override: bool,
     compatible_versions: tuple[int],
     orig_train_schema_path: pathlib.Path,
-    decoding_scheme: str,
+    prompt_type: str,
     split: str,
 ):
     args = OmegaConf.load(args_path)
@@ -191,7 +191,7 @@ def main(
     try:
         hyp_path = hyp_dir.joinpath(
             experiment,
-            decoding_scheme,
+            prompt_type,
             schema_variant_identifier,
             split,
             data_version,
@@ -204,7 +204,7 @@ def main(
             )
         hyp_path = Path(args.hyp_dir).joinpath(
             experiment,
-            decoding_scheme,
+            prompt_type,
             schema_variant_identifier,
             split,
             data_version,
