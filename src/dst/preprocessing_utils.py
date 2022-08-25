@@ -324,6 +324,8 @@ def postprocess_description(
 ) -> str:
     """Removes the full stop from the end of the description as the schema
     SGD descriptions are not punctuated."""
+
+    description = description.strip()
     if excluded_end_symbols is None:
         return description
     while description[-1] in excluded_end_symbols:
