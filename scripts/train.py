@@ -321,6 +321,7 @@ def optimize_model(
             _log_lr(scheduler)
 
             if n_batches % eval_step == 0:
+                start_time_to = time.time()
                 task_oriented_metrics = compute_task_oriented_metrics(
                     n_batches * train_args.batch_size,
                     model,
@@ -332,6 +333,10 @@ def optimize_model(
                 log_metrics_to_tb(
                     n_batches * train_args.batch_size, writer, task_oriented_metrics
                 )
+                logger.info(
+                    f"Took {time.time() - start_time_to:.3f} for task oriented evaluation"
+                )
+
                 if task_oriented_metrics:
                     inference_config.date = get_datetime()
                     OmegaConf.save(
@@ -713,6 +718,7 @@ def main(
             inference_config.decode_only = inference_data_loader.dataset.dialogue_ids
 
     logger.info(OmegaConf.to_yaml(args))
+    optimization_start = time.time()
     optimize_model(
         args,
         tokenizer,
@@ -726,6 +732,9 @@ def main(
         inference_data_loader=inference_data_loader,
         max_dev_jga=metrics.get("dev_jga", 0.0),
         patience=metrics.get("dev_jga_patience", 0),
+    )
+    logger.info(
+        f"Training and model selection took {time.time() - optimization_start} s!"
     )
 
 
