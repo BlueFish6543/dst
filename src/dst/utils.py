@@ -12,7 +12,7 @@ from functools import partial
 from itertools import repeat
 from operator import methodcaller
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Generator, Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -292,3 +292,110 @@ def cleanup_files(dir_: pathlib.Path, pattern: re.Pattern):
         if pattern.match(f.name):
             logger.info(f"Removing file: {f}")
             os.remove(f)
+
+
+def store_data(data, store: defaultdict, store_fields: list[str]):
+    """Stores data in a nested default dictionary at a specified location.
+
+    Parameters
+    ----------
+    data
+        Data to be stored. If this is a list and the store location is a list,
+        the store location is extended with the new elements. If data is not a list,
+        then it is appended to the store location.
+    store
+        Nested default dictionary where data is to be stored.
+    store_fields
+        Key where the data is to be stored
+
+    Notes
+    -----
+    Supported types for `store` leaves are ``int``, ``list`` and ``dict``.
+    """
+
+    store_location = safeget(store, *store_fields)
+    if isinstance(store_location, list):
+        if isinstance(data, list):
+            store_location.extend(data)
+        else:
+            store_location.append(data)
+    elif isinstance(store_location, int) or isinstance(store_location, float):
+        store_location = safeget(store, *store_fields[:-1])
+        if isinstance(data, int) or isinstance(data, float):
+            if isinstance(store_location, defaultdict):
+                if isinstance(store_location[store_fields[-1]], int) or isinstance(
+                    store_location[store_fields[-1]], float
+                ):
+                    store_location[store_fields[-1]] += data
+                else:
+                    raise NotImplementedError
+    elif isinstance(store_location, dict):
+        # nb, this can be more generic
+        assert isinstance(data, dict)
+        store_location.update(data)
+    else:
+        raise NotImplementedError
+
+
+def get_paths_to_values(d: dict) -> Generator[list]:
+    """Get paths to all values in an arbitrary nested mapping.
+
+    Parameters
+    ----------
+    d
+        Arbitrary nested mapping
+
+    Returns
+    -------
+    A generator which generates list, where each list is a path to a value in `d`.
+    """
+
+    def _paths_generator(d: dict, paths: list):
+        if not isinstance(d, dict):
+            yield paths
+        else:
+            yield from [
+                j for a, b in d.items() for j in _paths_generator(b, paths + [a])
+            ]
+
+    return _paths_generator(d, [])
+
+
+def average_nested_dicts(
+    dicts: list[dict], excluded_keys: Optional[list] = None
+) -> dict:
+    """Average the values of nested dictionaries with identical structure.
+
+    Parameters
+    ----------
+    dicts
+        Dictionaries to be averaged
+    excluded_keys
+        Which keys should be ignored. They will not be included in the output dictionary.
+    """
+
+    def infer_depth(mapping: dict, depth: int = 1):
+        """Calculates depth of `mapping`, assumed to be constant depth."""
+        if not mapping:
+            return 0
+        k = list(mapping.keys())[0]
+        if isinstance(mapping[k], dict):
+            depth = infer_depth(mapping[k], depth + 1)
+        return depth
+
+    # mappings assumed identical, so we create the average dict
+    # to be same depth.
+    depth = infer_depth(dicts[0])
+    average = nested_defaultdict(float, depth=depth)
+    for value_path in get_paths_to_values(dicts[0]):
+        # check if any of the keys should be excluded
+        if excluded_keys is not None and any(
+            key in excluded_keys for key in value_path
+        ):
+            continue
+        else:
+            this_path_values = [safeget(d, *value_path) for d in dicts]
+            store_data(
+                sum(this_path_values) / len(this_path_values), average, value_path
+            )
+    return average
