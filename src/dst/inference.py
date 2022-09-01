@@ -138,4 +138,6 @@ def setup_inference_config(
     if not metrics_dir.exists():
         metrics_dir.mkdir(exist_ok=True, parents=True)
     inference_config.metrics_dir = str(metrics_dir)
+    if not hasattr(inference_config, "save_dialogue_files"):
+        inference_config.save_dialogue_files = False
     return inference_config
