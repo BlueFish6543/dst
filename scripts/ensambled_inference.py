@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 _SPLIT = "test"
 _METRICS_ROOT = "metrics"
 
+service = ""
+
 
 def frame_sanity_check(frame: dict):
     assert not frame["slots"]
@@ -34,11 +36,15 @@ def convert_values_to_perc(metrics: dict) -> dict:
     def update_percentage(metric_raw_data: dict, container: dict, key: str):
 
         for task_name, task_metrics in metric_raw_data.items():
-            frame_count = task_metrics.pop("frame_count")
+            frame_count = task_metrics["frame_count"]
             for metric_name, value in task_metrics.items():
-                container[variant][key][task_name][metric_name] = round(
+                if metric_name == "frame_count":
+                    continue
+                container[variant][key][task_name][f"{metric_name}_perc"] = round(
                     100 * value / frame_count, 4
                 )
+                container[variant][key][task_name][metric_name] = int(value)
+                container[variant][key][task_name]["frame_count"] = int(frame_count)
 
     def service_metrics_container():
         return nested_defaultdict(dict, depth=2)
@@ -221,6 +227,7 @@ def ensemble_turn_predictions(
         ensemble_preds = next(zip(*ensemble_dials_iterators))  # type: tuple[dict]
         for template_frame in turn_iterator(template_turn):
             frame_sanity_check(template_frame)
+            global service
             service = template_frame["service"]
             hyp_frames = [
                 next(turn_iterator(pred, service=service)) for pred in ensemble_preds
@@ -342,13 +349,15 @@ def ensemble_inference(
     assert len(models) == len(model_steps), "Please specify the step for each model"
     ensemble_name = f"ensemble.1-{len(ensemble_dirs)}"
     # ensemble predictions and save SGD-formatted files
-    metrics = nested_defaultdict(list, depth=5)
     for model, step in zip(models, model_steps):
+        metrics = nested_defaultdict(list, depth=5)
         logger.info(f"Ensembling predictions for model {model}")
         for variant in schema_variants:
             logger.info(f"Ensembling predictions for schema variant {variant}")
             ensemble_metrics_dir = (
-                Path(".").resolve().joinpath(model, ensemble_name, variant, _SPLIT)
+                Path(".")
+                .resolve()
+                .joinpath(_METRICS_ROOT, model, ensemble_name, variant, _SPLIT)
             )
             ensemble_hyps_dir = (
                 Path(".")
