@@ -532,7 +532,8 @@ def main(
     output_path = pathlib.Path(output_path)
     data_paths = [pathlib.Path(p) for p in data_paths]
     preproc_confing = config.preprocessing
-    preproc_confing.descriptions.split = split
+    if hasattr(preproc_confing, "descriptions"):
+        preproc_confing.descriptions.split = split
     try:
         downsample_factor = config.downsample_factor
     except AttributeError:
