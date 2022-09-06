@@ -40,10 +40,10 @@ def convert_values_to_perc(metrics: dict) -> dict:
             for metric_name, value in task_metrics.items():
                 if metric_name == "frame_count":
                     continue
-                container[variant][key][task_name][f"{metric_name}_perc"] = round(
+                container[variant][key][task_name][metric_name] = round(
                     100 * value / frame_count, 4
                 )
-                container[variant][key][task_name][metric_name] = int(value)
+                container[variant][key][task_name][f"{metric_name}_counts"] = int(value)
                 container[variant][key][task_name]["frame_count"] = int(frame_count)
 
     def service_metrics_container():
