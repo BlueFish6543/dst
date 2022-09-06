@@ -383,6 +383,8 @@ def average_nested_dicts(
             depth = infer_depth(mapping[k], depth + 1)
         return depth
 
+    if not dicts:
+        return None
     # mappings assumed identical, so we create the average dict
     # to be same depth.
     depth = infer_depth(dicts[0])
@@ -398,4 +400,4 @@ def average_nested_dicts(
             store_data(
                 sum(this_path_values) / len(this_path_values), average, value_path
             )
-    return average
+    return default_to_regular(average)
