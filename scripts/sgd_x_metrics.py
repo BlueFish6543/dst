@@ -10,6 +10,7 @@ from pathlib import Path
 import click
 import numpy as np
 
+from dst.metrics import NAN_VAL
 from src.dst.scoring_utils import get_in_domain_services
 from src.dst.utils import (
     aggregate_values,
@@ -63,6 +64,14 @@ def get_metric_sensitivity(scores: np.ndarray) -> float:
     mean = np.mean(scores, axis=1, keepdims=True)
     std = np.sqrt(np.sum((scores - mean) ** 2, axis=1, keepdims=True) / (n_schemas - 1))
     return np.nanmean(std / mean)
+
+
+def remove_nan_val(lst: list) -> list:
+    """Remove NA from lists of scores where metrics are not applicable to allow averaging."""
+    logger.warning(
+        "Found NA in scores array. This may be expected depending on what metric you evaluate"
+    )
+    return [v for v in lst if v != NAN_VAL]
 
 
 @click.command()
@@ -209,22 +218,19 @@ def main(
                     for turn in dialogue["turns"]:
                         if turn["speaker"] == "USER":
                             for frame in turn["frames"]:
-                                this_step_idx_all_scores.append(
-                                    frame["metrics"][metric]
-                                )
+                                metric_value = frame["metrics"][metric]
+                                if metric_value == NAN_VAL:
+                                    continue
+                                this_step_idx_all_scores.append(metric_value)
                                 service_name = (
                                     frame["service"]
                                     if original
                                     else frame["service"][:-1]
                                 )
                                 if service_name in in_domain_services:
-                                    this_step_idx_seen_scores.append(
-                                        frame["metrics"][metric]
-                                    )
+                                    this_step_idx_seen_scores.append(metric_value)
                                 else:
-                                    this_step_idx_unseen_scores.append(
-                                        frame["metrics"][metric]
-                                    )
+                                    this_step_idx_unseen_scores.append(metric_value)
                 assert len(this_step_idx_unseen_scores) + len(
                     this_step_idx_seen_scores
                 ) == len(this_step_idx_all_scores)
@@ -236,32 +242,42 @@ def main(
             if not all_scores_across_variants:
                 for model_step in range(len(all_scores[model][variant][_SPLIT])):
                     all_scores_across_variants.append(
-                        [all_scores[model][variant][_SPLIT][model_step]]
+                        [remove_nan_val(all_scores[model][variant][_SPLIT][model_step])]
                     )
             else:
                 for model_step in range(len(all_scores[model][variant][_SPLIT])):
                     all_scores_across_variants[model_step].append(
-                        all_scores[model][variant][_SPLIT][model_step]
+                        remove_nan_val(all_scores[model][variant][_SPLIT][model_step])
                     )
             if not seen_scores_across_variants:
                 for model_step in range(len(seen_scores[model][variant][_SPLIT])):
                     seen_scores_across_variants.append(
-                        [seen_scores[model][variant][_SPLIT][model_step]]
+                        [
+                            remove_nan_val(
+                                seen_scores[model][variant][_SPLIT][model_step]
+                            )
+                        ]
                     )
             else:
                 for model_step in range(len(seen_scores[model][variant][_SPLIT])):
                     seen_scores_across_variants[model_step].append(
-                        seen_scores[model][variant][_SPLIT][model_step]
+                        remove_nan_val(seen_scores[model][variant][_SPLIT][model_step])
                     )
             if not unseen_scores_across_variants:
                 for model_step in range(len(unseen_scores[model][variant][_SPLIT])):
                     unseen_scores_across_variants.append(
-                        [unseen_scores[model][variant][_SPLIT][model_step]]
+                        [
+                            remove_nan_val(
+                                unseen_scores[model][variant][_SPLIT][model_step]
+                            )
+                        ]
                     )
             else:
                 for model_step in range(len(unseen_scores[model][variant][_SPLIT])):
                     unseen_scores_across_variants[model_step].append(
-                        unseen_scores[model][variant][_SPLIT][model_step]
+                        remove_nan_val(
+                            unseen_scores[model][variant][_SPLIT][model_step]
+                        )
                     )
         logger.info(f"Model {model}")
         variant_aggregated_scores = deepcopy(all_scores[model])
