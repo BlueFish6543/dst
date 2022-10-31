@@ -6,7 +6,7 @@ import os
 import pathlib
 import random
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from functools import partial
 from itertools import repeat
@@ -201,6 +201,14 @@ def aggregate_values(
                 if isinstance(mapping[key], list) and isinstance(mapping[key][0], list):
                     agg_res = []
                     for val in mapping[key]:
+                        cts = Counter(val)
+                        exclude = [v for v in cts if not isinstance(v, float)]
+                        if exclude:
+                            not_floats = {
+                                c: cts[c] for c in cts if not isinstance(c, float)
+                            }
+                            logger.warning(f"Ignoring {not_floats}")
+                        val = [v for v in val if isinstance(v, float)]
                         aggregator = methodcaller(agg_fcn, val)
                         agg_res.append(aggregator(np))
                     mapping[key] = agg_res
@@ -330,9 +338,18 @@ def store_data(data, store: defaultdict, store_fields: list[str]):
                 else:
                     raise NotImplementedError
     elif isinstance(store_location, dict):
-        # nb, this can be more generic
-        assert isinstance(data, dict)
-        store_location.update(data)
+        # assert isinstance(data, dict)
+        if isinstance(data, dict):
+            store_location.update(data)
+        else:
+            logger.debug(
+                f"Storing data of type {type(data)} at leaf with nested key {store_fields[:-1]}"
+            )
+            store_location = safeget(store, *store_fields[:-1])
+            store_location[store_fields[-1]] = data
+            logger.debug(
+                f"Stored data at key {store_fields[-1]}. Upstream keys are {store_fields[:-1]}"
+            )
     else:
         raise NotImplementedError
 
