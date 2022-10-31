@@ -250,7 +250,10 @@ def split_iterator(
 
 
 def dialogue_iterator(
-    dialogue: dict, user: bool = True, system: bool = True
+    dialogue: dict,
+    user: bool = True,
+    system: bool = True,
+    max_turn: int = 999,
 ) -> Generator[dict]:
     """Iterate through turns in a dialogue."""
 
@@ -259,7 +262,9 @@ def dialogue_iterator(
 
     filter = "USER" if not user else "SYSTEM" if not system else ""
 
-    for turn in dialogue["turns"]:
+    for i, turn in enumerate(dialogue["turns"]):
+        if i == max_turn:
+            raise StopIteration
         if filter and turn.get("speaker", "") == filter:
             continue
         else:
