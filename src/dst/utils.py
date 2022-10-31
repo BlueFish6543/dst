@@ -379,7 +379,9 @@ def get_paths_to_values(d: dict) -> Generator[list]:
 
 
 def average_nested_dicts(
-    dicts: list[dict], excluded_keys: Optional[list] = None
+    dicts: list[dict],
+    excluded_keys: Optional[list] = None,
+    max_depth: Optional[int] = None,
 ) -> dict:
     """Average the values of nested dictionaries with identical structure.
 
@@ -389,6 +391,8 @@ def average_nested_dicts(
         Dictionaries to be averaged
     excluded_keys
         Which keys should be ignored. They will not be included in the output dictionary.
+    max_depth
+        Use this to override automatically inferred depth from dicts[0].
     """
 
     def infer_depth(mapping: dict, depth: int = 1):
@@ -404,7 +408,10 @@ def average_nested_dicts(
         return None
     # mappings assumed identical, so we create the average dict
     # to be same depth.
-    depth = infer_depth(dicts[0])
+    if max_depth is None:
+        depth = infer_depth(dicts[0])
+    else:
+        depth = max_depth
     average = nested_defaultdict(float, depth=depth)
     for value_path in get_paths_to_values(dicts[0]):
         # check if any of the keys should be excluded
