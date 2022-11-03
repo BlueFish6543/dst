@@ -133,6 +133,13 @@ def remove_nan_val(lst: list) -> list:
     is_flag=True,
     default=False,
 )
+@click.option(
+    "-sgd",
+    "--sgd_dir",
+    "sgd_dir",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+)
 def main(
     schema_variants: tuple[str],
     hyps_source_dir: str,
@@ -141,6 +148,7 @@ def main(
     metric: str,
     average_across_models: bool,
     original: bool,
+    sgd_dir: Path,
 ):
     if original:
         schema_variants = ("original",)
@@ -182,12 +190,8 @@ def main(
             ]
 
     # Metric to use
-    orig_train_schema_path = (
-        Path(".").resolve().joinpath("data/raw/sgd/train/schema.json")
-    )
-    orig_test_schema_path = (
-        Path(".").resolve().joinpath("data/raw/sgd/test/schema.json")
-    )
+    orig_train_schema_path = sgd_dir.joinpath("train", "schema.json")
+    orig_test_schema_path = sgd_dir.joinpath("test", "schema.json")
     in_domain_services = get_in_domain_services(
         orig_train_schema_path, orig_test_schema_path
     )
