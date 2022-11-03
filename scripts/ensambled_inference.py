@@ -357,7 +357,7 @@ def ensemble_inference(
             ensemble_metrics_dir = (
                 Path(".")
                 .resolve()
-                .joinpath(_METRICS_ROOT, model, ensemble_name, variant, _SPLIT)
+                .joinpath(_METRICS_ROOT, model, ensemble_name, variant, _SPLIT, version)
             )
             ensemble_hyps_dir = (
                 Path(".")
