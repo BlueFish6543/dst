@@ -451,6 +451,12 @@ def optimize_model(
 def set_model(args: DictConfig, data_parallel: bool = False):
     # Initiate config, tokenizer and model
     config = AutoConfig.from_pretrained(args.model_name_or_path)
+    config_update = args.get("config_update", config)
+    if config_update:
+        logger.info(
+            f"The following configurations updates were detected: {config_update}"
+        )
+        config.update(config_update)
     tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
     model = T5ForConditionalGeneration.from_pretrained(
         args.model_name_or_path, config=config
