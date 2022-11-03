@@ -98,7 +98,11 @@ def load_metrics(
     metrics = []
 
     def load_metrics_file(metrics_path: Path) -> dict:
-        metrics_files = list(metrics_path.glob("*.json"))
+        if metrics_path.name.endswith(".json"):
+            metrics_files = [metrics_path]
+        else:
+            metrics_files = list(metrics_path.glob("*.json"))
+
         if len(metrics_files) == 0:
             return
         if len(metrics_files) > 1:
@@ -136,6 +140,7 @@ def load_metrics(
                         m = load_metrics_file(metrics_path)
                         if m is not None:
                             this_pth_metrics[ver][variant][v] = m
+
         metrics.append(default_to_regular(this_pth_metrics))
     return metrics
 
@@ -159,6 +164,8 @@ def get_average_metric_value(
 
     def _format_service_for_variant(domain_or_service: str) -> str:
         nonlocal var  # SGD variant
+        if domain_or_service.startswith("#"):
+            return domain_or_service
         if "_" in domain_or_service and var != "original":
             return f"{domain_or_service}{var[-1]}"
         return domain_or_service
@@ -183,10 +190,16 @@ def get_average_metric_value(
                 metric,
             ]
         value = safeget(average_metrics, *store_key)
-        if return_list:
-            metric_by_variant[var] = [value]
-        else:
-            metric_by_variant[var] = value
+        metric_by_variant[var] = value
+
+    sgdx_average = (
+        sum(metric_by_variant[var] for var in schema_variants if var != "original") / 5
+    )
+    metric_by_variant["sgd_x_average"] = sgdx_average
+    if return_list:
+        for var in metric_by_variant:
+            metric_by_variant[var] = [metric_by_variant[var]]
+
     return metric_by_variant
 
 
@@ -232,16 +245,8 @@ def rank_services_by_performance(
             schema_variants=schema_variants,
             return_list=True,
         )
-        sgdx_average = (
-            sum(
-                this_service_avg_metrics[var][0]
-                for var in schema_variants
-                if var != "original"
-            )
-            / 5
-        )
-        this_service_avg_metrics["sgd_x_average"] = [sgdx_average]
         append_to_values(metric_values["combined"], this_service_avg_metrics)
+        print(SEEN_SERVICES[split])
         if service in SEEN_SERVICES[split]:
             append_to_values(metric_values["seen"], this_service_avg_metrics)
         else:
@@ -251,8 +256,20 @@ def rank_services_by_performance(
         for variant in list(schema_variants) + ["sgd_x_average"]:
             this_variant_metric_vals = metric_values[service_type][variant]
             sort_indices = np.argsort(this_variant_metric_vals)
+            if service_type == "combined":
+                this_service_type_services = deepcopy(service_order)
+            else:
+                if service_type == "seen":
+                    this_service_type_services = [
+                        s for s in service_order if s in SEEN_SERVICES[split]
+                    ]
+                else:
+                    this_service_type_services = [
+                        s for s in service_order if s in UNSEEN_SERVICES[split]
+                    ]
             ranked_services = [
-                (service_order[i], this_variant_metric_vals[i]) for i in sort_indices
+                (this_service_type_services[i], this_variant_metric_vals[i])
+                for i in sort_indices
             ]
             ranked_results[service_type][variant] = ranked_services
 
@@ -260,9 +277,6 @@ def rank_services_by_performance(
 
 
 if __name__ == "__main__":
-    model = "d3st_concat_corpus_description_oracle"
-    decoding_data_version = "version_9"
-    decoding_strategy = "random_turn_example"
 
     keywords = [
         "v15_oracle",
@@ -290,6 +304,16 @@ if __name__ == "__main__":
     average_metrics = {}
     for key in metrics:
         average_metrics[key] = average_nested_dicts(metrics[key], max_depth=10)
+    model = "d3st_concat_corpus_description_oracle"
+    decoding_data_version = "version_9"
+    decoding_strategy = "ensemble.1-3"
+    avg_metrics = get_average_metric_value(
+        average_metrics,
+        "d3st_concat_corpus_description_oracle",
+        "version_9",
+        "ensemble.1-3",
+        "#ALL_SERVICES",
+    )
     ranked_services = rank_services_by_performance(
         average_metrics, model, decoding_data_version, decoding_strategy
     )
