@@ -20,7 +20,11 @@ from src.dst.utils import (
     nested_defaultdict,
 )
 
+METRICS_FILE = "metrics_and_dialogues.json"
+# METRICS_FILE = "dialogues_and_metrics.json"
+
 _SPLIT = "test"
+# _SPLIT = ''
 _CHECKPOINT_PREFIX = "model"
 
 TRACKED_METRICS = [
@@ -87,9 +91,9 @@ def remove_nan_val(lst: list) -> list:
     "-ver",
     "--version",
     "version",
-    default=None,
+    default="",
     type=str,
-    required=True,
+    required=False,
     help="The data version on which the model was trained on. Should be in the format version_*.",
 )
 @click.option(
@@ -176,10 +180,7 @@ def main(
                 f"Paths for model {model}, schema variant {variant}, {this_model_schema_variant_paths}"
             )
             frame_metric_paths[model][variant][_SPLIT].extend(
-                [
-                    p.joinpath("metrics_and_dialogues.json")
-                    for p in this_model_schema_variant_paths
-                ]
+                [p.joinpath(f"{METRICS_FILE}") for p in this_model_schema_variant_paths]
             )
 
     frame_metrics = nested_defaultdict(list, depth=3)
