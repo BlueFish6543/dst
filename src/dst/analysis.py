@@ -126,6 +126,7 @@ def load_metrics(
                 else:
                     versions = []
                 for version in versions:
+                    assert not version.endswith(".json")
                     metrics_path = variant_dir.joinpath(split, version)
                     m = load_metrics_file(metrics_path)
                     if m is not None:
@@ -279,6 +280,7 @@ def rank_services_by_performance(
 if __name__ == "__main__":
 
     keywords = [
+        "d3st_baseline",
         "v15_oracle",
         "v15_corpus_description_oracle",
         "d3st_concat_corpus_description_oracle",
@@ -303,6 +305,7 @@ if __name__ == "__main__":
         )
     average_metrics = {}
     for key in metrics:
+        print(key)
         average_metrics[key] = average_nested_dicts(metrics[key], max_depth=10)
     model = "d3st_concat_corpus_description_oracle"
     decoding_data_version = "version_9"
