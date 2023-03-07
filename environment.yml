@@ -7,7 +7,6 @@ dependencies:
   - python>=3.9, <3.10
   - pip
   - pip:
-    - matplotlib
     - -e .
 
 # python -m pip install -U torch==1.10.0+cu111 -f https://download.pytorch.org/whl/torch_stable.html
