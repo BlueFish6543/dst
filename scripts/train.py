@@ -196,10 +196,14 @@ def compute_task_oriented_metrics(
             evaluator_inputs["eval_services"],
             evaluator_inputs["in_domain_services"],
         )
-        logger.info(f"Dialogue metrics {str(all_metrics_aggregate['#ALL_SERVICES'])}")
-        logger.info(f"Dialogue metrics {str(all_metrics_aggregate['#SEEN_SERVICES'])}")
         logger.info(
-            f"Dialogue metrics {str(all_metrics_aggregate['#UNSEEN_SERVICES'])}"
+            f"Dialogue metrics (all) {str(all_metrics_aggregate['#ALL_SERVICES'])}"
+        )
+        logger.info(
+            f"Dialogue metrics (seen) {str(all_metrics_aggregate['#SEEN_SERVICES'])}"
+        )
+        logger.info(
+            f"Dialogue metrics (unseen) {str(all_metrics_aggregate['#UNSEEN_SERVICES'])}"
         )
         save_metrics(
             global_step,
@@ -250,6 +254,7 @@ def optimize_model(
 
     train_dev_args = args
     dev_args, train_args = args.dev, args.train
+    min_improvement = args.train.get("min_jga_improvement", 0.0)
     max_patience = int(
         (dev_args.patience // train_args.batch_size)
         / (dev_args.eval_interval // train_args.batch_size)
@@ -257,6 +262,7 @@ def optimize_model(
     logger.info(
         f"Training will stop if dev JGA does not improve after {max_patience} inference evaluations"
     )
+    logger.info(f"Minimum JGA improvement: {min_improvement}")
     logger.info(f"Remaining tries: {max_patience - patience}")
     # assume that for some reason we want to continue training
     # after max dev jga stopped it
@@ -349,7 +355,7 @@ def optimize_model(
                     dev_jga = task_oriented_metrics["#ALL_SERVICES"][
                         "joint_goal_accuracy"
                     ]
-                    if dev_jga > max_dev_jga:
+                    if dev_jga - max_dev_jga > min_improvement:
                         logger.info(f"dev JGA improved from {max_dev_jga} to {dev_jga}")
                         max_dev_jga = dev_jga
                         patience = 0
@@ -451,8 +457,8 @@ def optimize_model(
 def set_model(args: DictConfig, data_parallel: bool = False):
     # Initiate config, tokenizer and model
     config = AutoConfig.from_pretrained(args.model_name_or_path)
-    config_update = args.get("config_update", config)
-    if config_update:
+    config_update = args.get("config_update", None)
+    if config_update is not None:
         logger.info(
             f"The following configurations updates were detected: {config_update}"
         )
